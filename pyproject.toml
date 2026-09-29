@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agy-admin"
+version = "0.2.0"
+description = "Antigravity User-Level Usage Monitoring and Access Cap Control CLI and Batch Job for Gemini Enterprise"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-cloud-logging>=3.11.0",
+    "google-cloud-resource-manager>=1.12.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+agy-admin-cli = "agy_admin.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["agy_admin*"]
