@@ -322,30 +322,30 @@ Cloud Scheduler로 예약된 Cloud Run Jobs를 사용하여 집행 사이클을 
 ### 1) Cloud Run Job 배포
 ```bash
 # 기본 배포 (15분 주기 실행, 사전 점검 포함)
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # 초기 검증을 위한 dry-run 모드 배포
-DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # 임계값 및 알림 설정을 지정한 배포
 CAP_PERIOD="daily" \
 WINDOW_TYPE="rolling" \
 CAP_TOKENS=800000 \
 ALERT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/..." \
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # 사전 점검 지적사항을 감수하고 배포하는 경우
-SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 ```
 
 ### 2) 수동 실행 및 로그 확인
 ```bash
 # 즉시 실행 트리거
-gcloud run jobs execute agy-cap-enforcer --region=asia-northeast3 --project=<PROJECT_ID>
+gcloud run jobs execute agy-cap-enforcer --region=asia-south1 --project=<PROJECT_ID>
 
 # 실행 로그 실시간 확인
 gcloud beta run jobs executions logs tail \
-  $(gcloud run jobs executions list --job=agy-cap-enforcer --region=asia-northeast3 --project=<PROJECT_ID> --limit=1 --format="value(name)") \
+  $(gcloud run jobs executions list --job=agy-cap-enforcer --region=asia-south1 --project=<PROJECT_ID> --limit=1 --format="value(name)") \
   --project=<PROJECT_ID>
 
 # 관리 감사 로그 조회

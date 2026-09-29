@@ -4,13 +4,13 @@
 set -euo pipefail
 
 PROJECT_ID="${1:-${GCP_PROJECT:-}}"
-REGION="${2:-asia-northeast3}"
+REGION="${2:-asia-south1}"
 JOB_NAME="agy-cap-enforcer"
 SCHEDULE="${3:-*/15 * * * *}" # Run every 15 minutes by default
 
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "Usage: $0 <PROJECT_ID> [REGION] [SCHEDULE_CRON]"
-  echo "Example: $0 my-gcp-project asia-northeast3 '*/10 * * * *'"
+  echo "Example: $0 my-gcp-project asia-south1 '*/10 * * * *'"
   exit 1
 fi
 

@@ -322,30 +322,30 @@ Automate cap enforcement cycles using Cloud Run Jobs scheduled via Cloud Schedul
 ### 1) Deploying the Cloud Run Job
 ```bash
 # Standard deployment (runs every 15 minutes, preflight check included)
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # Deploy in dry-run mode for initial observation
-DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # Deploy with customized cap thresholds and alerts
 CAP_PERIOD="daily" \
 WINDOW_TYPE="rolling" \
 CAP_TOKENS=800000 \
 ALERT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/..." \
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # Bypass preflight check when partial coverage is expected
-SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-northeast3 "*/15 * * * *"
+SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 ```
 
 ### 2) Execution & Verification
 ```bash
 # Trigger an immediate run
-gcloud run jobs execute agy-cap-enforcer --region=asia-northeast3 --project=<PROJECT_ID>
+gcloud run jobs execute agy-cap-enforcer --region=asia-south1 --project=<PROJECT_ID>
 
 # View job execution logs
 gcloud beta run jobs executions logs tail \
-  $(gcloud run jobs executions list --job=agy-cap-enforcer --region=asia-northeast3 --project=<PROJECT_ID> --limit=1 --format="value(name)") \
+  $(gcloud run jobs executions list --job=agy-cap-enforcer --region=asia-south1 --project=<PROJECT_ID> --limit=1 --format="value(name)") \
   --project=<PROJECT_ID>
 
 # Review administrative audit records

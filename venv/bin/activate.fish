@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV "/Users/nayanen/Downloads/agy-admin-cli/venv"
+set -gx VIRTUAL_ENV "/Users/nayanen/Downloads/antigravity-admin-cli/venv"
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/bin" $PATH
