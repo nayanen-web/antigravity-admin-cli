@@ -295,9 +295,33 @@ agy-admin-cli cap apply --period daily --window rolling --tokens 800000 --projec
 # 요청 수와 토큰 수를 함께 제한
 agy-admin-cli cap apply --period daily --requests 1000 --tokens 500000 --project <PROJECT_ID>
 
+# JSON 설정 파일을 사용한 기본값 및 사용자별 맞춤 캡 적용
+agy-admin-cli cap apply --period monthly --config-file user_caps.json --project <PROJECT_ID>
+
 # IAM 변경 없이 평가 결과 미리보기
 agy-admin-cli cap apply --period daily --tokens 500000 --dry-run --project <PROJECT_ID>
 ```
+
+#### 사용자별 맞춤 캡 설정 (`user_caps.json`)
+특정 사용자(VIP, 리드 개발자 등)에게 다른 한도를 적용하면서 기본 한도를 함께 정의할 수 있습니다:
+```json
+{
+  "default": {
+    "max_tokens": 5000000
+  },
+  "overrides": {
+    "user@example.com": {
+      "max_tokens": 15000000
+    },
+    "lead@example.com": {
+      "max_tokens": 25000000
+    }
+  }
+}
+```
+* `overrides`에 명시된 사용자는 맞춤 한도로 평가됩니다.
+* 그 외 사용자는 `default` 한도로 평가됩니다.
+* 이메일 대소문자는 구분하지 않습니다.
 
 실행 결과 리포트 구성:
 1. **Cap Enforcement Summary**: 제어율(Coverage), 집행 건수, 수동 조치 필요 대상 건수 요약
@@ -327,12 +351,11 @@ Cloud Scheduler로 예약된 Cloud Run Jobs를 사용하여 집행 사이클을 
 # 초기 검증을 위한 dry-run 모드 배포
 DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
-# 임계값 및 알림 설정을 지정한 배포
-CAP_PERIOD="daily" \
-WINDOW_TYPE="rolling" \
-CAP_TOKENS=800000 \
+# 임계값, 사용자별 맞춤 캡(user_caps.json) 및 알림 설정을 지정한 배포
+CAP_PERIOD="monthly" \
+CAP_CONFIG_FILE="user_caps.json" \
 ALERT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/..." \
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "0 0 1 * *"
 
 # 사전 점검 지적사항을 감수하고 배포하는 경우
 SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
@@ -367,6 +390,7 @@ gcloud logging read \
 | `WINDOW_TYPE` | `calendar` | 윈도우 계산 방식 (`calendar`: UTC 00:00 기준, `rolling`: 슬라이딩 윈도우) |
 | `CAP_TOKENS` | - | 토큰 캡 임계값 (예: `800000`) |
 | `CAP_REQUESTS` | - | 요청 수 캡 임계값 (예: `1000`) |
+| `CAP_CONFIG_FILE` | - | 기본 한도 및 사용자별 맞춤 한도를 정의한 JSON 파일 경로 (예: `user_caps.json`) |
 | `IAM_DISALLOW_MODE` | `custom_role` | 차단 방식 (`custom_role` 또는 `revoke`) |
 | `DRY_RUN` | `false` | `true` 설정 시 IAM 변경 없이 시뮬레이션 |
 | `INTERVAL_MINUTES` | `0` | `0`은 1회 실행 후 종료. Cloud Run Jobs에서는 `0`으로 설정 |
@@ -402,6 +426,7 @@ pytest -v tests/
 
 테스트 스위트는 다음 항목을 검증합니다:
 - 6개 상태 분류 로직 및 사유 코드 할당
+- 사용자별 맞춤 캡 한도 및 오버라이드 평가 (`user_caps.json`)
 - 주요 예외 상황 회귀 테스트 (그룹 바인딩, 로그 누락, 정책 조회 오류 등)
 - 안전 게이트 G1~G5 및 서킷 브레이커 동작
 - Resource Manager SDK 버전 3 정책 읽기 및 배치 쓰기

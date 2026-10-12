@@ -295,9 +295,33 @@ agy-admin-cli cap apply --period daily --window rolling --tokens 800000 --projec
 # Combined request and token caps
 agy-admin-cli cap apply --period daily --requests 1000 --tokens 500000 --project <PROJECT_ID>
 
+# Apply default caps with user-specific overrides from JSON file
+agy-admin-cli cap apply --period monthly --config-file user_caps.json --project <PROJECT_ID>
+
 # Preview cap evaluation without changing IAM
 agy-admin-cli cap apply --period daily --tokens 500000 --dry-run --project <PROJECT_ID>
 ```
+
+#### User-Specific Cap Overrides (`user_caps.json`)
+You can define default limits alongside custom limits for specific users (e.g. VIPs, team leads):
+```json
+{
+  "default": {
+    "max_tokens": 5000000
+  },
+  "overrides": {
+    "user@example.com": {
+      "max_tokens": 15000000
+    },
+    "lead@example.com": {
+      "max_tokens": 25000000
+    }
+  }
+}
+```
+* Users listed in `overrides` are evaluated against their custom limits.
+* All other users fall back to `default`.
+* Email matching is case-insensitive.
 
 The report includes:
 1. **Cap Enforcement Summary**: Coverage ratio, applied blocks, and manual review counts
@@ -327,12 +351,11 @@ Automate cap enforcement cycles using Cloud Run Jobs scheduled via Cloud Schedul
 # Deploy in dry-run mode for initial observation
 DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
-# Deploy with customized cap thresholds and alerts
-CAP_PERIOD="daily" \
-WINDOW_TYPE="rolling" \
-CAP_TOKENS=800000 \
+# Deploy with customized cap thresholds, per-user overrides, and alerts
+CAP_PERIOD="monthly" \
+CAP_CONFIG_FILE="user_caps.json" \
 ALERT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/..." \
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "0 0 1 * *"
 
 # Bypass preflight check when partial coverage is expected
 SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
@@ -367,6 +390,7 @@ gcloud logging read \
 | `WINDOW_TYPE` | `calendar` | Window calculation (`calendar` or `rolling`) |
 | `CAP_TOKENS` | - | Token cap threshold (e.g. `800000`) |
 | `CAP_REQUESTS` | - | Request count threshold (e.g. `1000`) |
+| `CAP_CONFIG_FILE` | - | Path to JSON file defining default limits and per-user overrides (e.g. `user_caps.json`) |
 | `IAM_DISALLOW_MODE` | `custom_role` | Restriction mode (`custom_role` or `revoke`) |
 | `DRY_RUN` | `false` | When `true`, evaluates without modifying IAM |
 | `INTERVAL_MINUTES` | `0` | `0` executes once and exits. Set to `0` when deployed as a Cloud Run Job |
@@ -402,6 +426,7 @@ pytest -v tests/
 
 The test suite covers:
 - Six-state classification logic and reason code assignments
+- User-specific cap limits and per-user overrides evaluation (`user_caps.json`)
 - Regression tests for edge cases (group bindings, missing logs, policy read failures)
 - Safety gates G1 through G5 and circuit breaker behavior
 - Resource Manager SDK version 3 policy reads and atomic writes

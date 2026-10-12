@@ -450,14 +450,21 @@ def apply_caps(
     output_format: OutputFormat = typer.Option(
         OutputFormat.TEXT, "--format", "-f", help="Output format: text, json, csv"
     ),
+    config_file: Optional[Path] = typer.Option(
+        None, "--config-file", "-c", help="Path to JSON file with default limits and user overrides"
+    ),
 ):
     """Evaluate usage against thresholds and disallow users exceeding the limits."""
     if period == PeriodType.ALL:
         typer.echo("Error: Cap period cannot be 'all'. Choose daily, weekly, or monthly.", err=True)
         raise typer.Exit(code=1)
 
-    if requests is None and tokens is None:
-        typer.echo("Error: Please specify at least --requests or --tokens limit.", err=True)
+    if config_file is not None and not config_file.exists():
+        typer.echo(f"Error: Cap config file not found: {config_file}", err=True)
+        raise typer.Exit(code=1)
+
+    if requests is None and tokens is None and config_file is None:
+        typer.echo("Error: Please specify at least --requests, --tokens limit, or --config-file.", err=True)
         raise typer.Exit(code=1)
 
     settings = get_settings(project)
@@ -471,6 +478,7 @@ def apply_caps(
         window_type=window,
         disallow_mode=mode,
         dry_run=dry_run,
+        config_file=config_file,
     )
 
     output = format_enforce_result(result, output_format=output_format)

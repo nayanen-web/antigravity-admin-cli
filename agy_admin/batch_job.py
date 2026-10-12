@@ -143,6 +143,7 @@ def run_enforcement_cycle(
     disallow_mode: DisallowMode,
     dry_run: bool,
     webhook_url: Optional[str],
+    config_file: Optional[str] = None,
 ) -> EnforceResult:
     """Executes a single cycle of cap enforcement."""
     logger.info(
@@ -162,6 +163,7 @@ def run_enforcement_cycle(
         window_type=window_type,
         disallow_mode=disallow_mode,
         dry_run=dry_run,
+        config_file=config_file,
     )
 
     print(format_enforce_result(result, output_format=OutputFormat.TEXT))
@@ -211,9 +213,11 @@ def main() -> None:
     cap_tokens_str = os.environ.get("CAP_TOKENS")
     cap_tokens = int(cap_tokens_str) if cap_tokens_str and cap_tokens_str.isdigit() else None
 
-    if cap_requests is None and cap_tokens is None:
+    config_file = os.environ.get("CAP_CONFIG_FILE")
+
+    if cap_requests is None and cap_tokens is None and not config_file:
         logger.error(
-            "Neither CAP_REQUESTS nor CAP_TOKENS is set; refusing to run a no-op cycle."
+            "Neither CAP_REQUESTS, CAP_TOKENS, nor CAP_CONFIG_FILE is set; refusing to run a no-op cycle."
         )
         sys.exit(EXIT_CONFIG)
 
@@ -241,6 +245,7 @@ def main() -> None:
             disallow_mode=disallow_mode,
             dry_run=dry_run,
             webhook_url=webhook_url,
+            config_file=config_file,
         )
 
     if interval_minutes > 0:

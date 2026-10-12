@@ -103,6 +103,9 @@ ENV_VARS="GCP_PROJECT=${PROJECT_ID},CAP_PERIOD=${CAP_PERIOD},CAP_REQUESTS=${CAP_
 if [[ -n "${ALERT_WEBHOOK_URL}" ]]; then
   ENV_VARS="${ENV_VARS},ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}"
 fi
+if [[ -n "${CAP_CONFIG_FILE:-}" ]]; then
+  ENV_VARS="${ENV_VARS},CAP_CONFIG_FILE=${CAP_CONFIG_FILE}"
+fi
 
 gcloud run jobs deploy "${JOB_NAME}" \
   --image="${IMAGE_URI}" \

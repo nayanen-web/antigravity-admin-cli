@@ -179,6 +179,16 @@ class CapRule(BaseModel):
     max_tokens: Optional[int] = None
 
 
+class UserCapLimit(BaseModel):
+    max_tokens: Optional[int] = None
+    max_requests: Optional[int] = None
+
+
+class CapConfigFile(BaseModel):
+    default: UserCapLimit = Field(default_factory=UserCapLimit)
+    overrides: Dict[str, UserCapLimit] = Field(default_factory=dict)
+
+
 class CapViolation(BaseModel):
     user_id: str
     period: str
@@ -192,6 +202,7 @@ class CapViolation(BaseModel):
     status: UserStatus = UserStatus.UNKNOWN
     reason: Optional[ReasonCode] = None
     enforced: bool = False
+    is_override: bool = False
 
 
 class RefusedAction(BaseModel):

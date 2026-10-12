@@ -5,14 +5,18 @@ Enforcement is whitelist-driven: the automatic cycle may only block users in
 other state results in no IAM mutation and an explicit record of why.
 """
 
+import json
 import logging
-from typing import Dict, List, Optional, Sequence, Set
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Set, Union
 
 from agy_admin.config import Settings, get_settings
 from agy_admin.iam_manager import BindingOp, IAMManager
 from agy_admin.logging_client import LoggingMetricsClient, MetricsFetchResult
 from agy_admin.models import (
     AuditAction,
+    CapConfigFile,
     CapRule,
     CapViolation,
     Coverage,
@@ -23,12 +27,23 @@ from agy_admin.models import (
     PeriodType,
     ReasonCode,
     UserAssessment,
+    UserCapLimit,
     UserMetric,
     UserStatus,
     WindowType,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def load_cap_config(config_path: Union[str, Path]) -> CapConfigFile:
+    """Loads and validates cap configuration with defaults and per-user overrides."""
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Cap config file not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return CapConfigFile.model_validate(data)
 
 
 class CapManager:
@@ -52,35 +67,60 @@ class CapManager:
         self,
         metrics: Dict[str, UserMetric],
         rule: CapRule,
+        user_overrides: Optional[Dict[str, Union[dict, UserCapLimit]]] = None,
     ) -> List[CapViolation]:
-        """Detects which users exceeded the given CapRule."""
+        """Detects which users exceeded their respective caps (default or user overrides)."""
         violations: List[CapViolation] = []
+        normalized_overrides: Dict[str, dict] = {}
+        if user_overrides:
+            for k, v in user_overrides.items():
+                if isinstance(v, UserCapLimit):
+                    normalized_overrides[k.strip().lower()] = v.model_dump(exclude_unset=True)
+                elif isinstance(v, dict):
+                    normalized_overrides[k.strip().lower()] = v
 
         for user_id, m in metrics.items():
-            if rule.max_requests is not None and m.total_requests > rule.max_requests:
+            user_key = user_id.strip().lower()
+            override_cfg = normalized_overrides.get(user_key)
+            is_override = override_cfg is not None
+
+            eff_requests = (
+                override_cfg.get("max_requests")
+                if is_override and override_cfg.get("max_requests") is not None
+                else rule.max_requests
+            )
+            eff_tokens = (
+                override_cfg.get("max_tokens")
+                if is_override and override_cfg.get("max_tokens") is not None
+                else rule.max_tokens
+            )
+
+            if eff_requests is not None and m.total_requests > eff_requests:
                 violations.append(
                     CapViolation(
                         user_id=user_id,
                         period=rule.period.value,
                         metric_type="requests",
-                        limit=rule.max_requests,
+                        limit=eff_requests,
                         actual=m.total_requests,
-                        overage=m.total_requests - rule.max_requests,
+                        overage=m.total_requests - eff_requests,
                         status=m.status,
                         reason=m.reason,
+                        is_override=is_override and override_cfg.get("max_requests") is not None,
                     )
                 )
-            if rule.max_tokens is not None and m.total_tokens > rule.max_tokens:
+            if eff_tokens is not None and m.total_tokens > eff_tokens:
                 violations.append(
                     CapViolation(
                         user_id=user_id,
                         period=rule.period.value,
                         metric_type="tokens",
-                        limit=rule.max_tokens,
+                        limit=eff_tokens,
                         actual=m.total_tokens,
-                        overage=m.total_tokens - rule.max_tokens,
+                        overage=m.total_tokens - eff_tokens,
                         status=m.status,
                         reason=m.reason,
+                        is_override=is_override and override_cfg.get("max_tokens") is not None,
                     )
                 )
 
@@ -99,10 +139,20 @@ class CapManager:
         disallow_mode: DisallowMode = DisallowMode.CUSTOM_ROLE,
         dry_run: bool = False,
         mock_entries: Optional[List[dict]] = None,
+        config_file: Optional[Union[str, Path]] = None,
     ) -> EnforceResult:
         result = EnforceResult(period=period.value, dry_run=dry_run)
 
-        if max_requests is None and max_tokens is None:
+        cap_config = None
+        target_config_file = config_file or os.environ.get("CAP_CONFIG_FILE")
+        if target_config_file:
+            cap_config = load_cap_config(target_config_file)
+            if max_requests is None and cap_config.default.max_requests is not None:
+                max_requests = cap_config.default.max_requests
+            if max_tokens is None and cap_config.default.max_tokens is not None:
+                max_tokens = cap_config.default.max_tokens
+
+        if max_requests is None and max_tokens is None and (not cap_config or not cap_config.overrides):
             logger.info("No cap thresholds specified; nothing to enforce.")
             return result
 
@@ -188,7 +238,11 @@ class CapManager:
         )
 
         # --- Decide actions ---------------------------------------------
-        violations = self.evaluate_violations(metrics, rule)
+        violations = self.evaluate_violations(
+            metrics,
+            rule,
+            user_overrides=cap_config.overrides if cap_config else None,
+        )
         result.violations = violations
         violating_uids: Set[str] = {v.user_id for v in violations}
 

@@ -228,11 +228,12 @@ def format_enforce_result(
         table.add_column("Overage", justify="right")
         table.add_column("Action Taken", justify="left")
         for v in result.violations:
+            limit_str = f"{v.limit:,} (override)" if getattr(v, "is_override", False) else f"{v.limit:,}"
             table.add_row(
                 v.user_id,
                 v.period,
                 v.metric_type,
-                f"{v.limit:,}",
+                limit_str,
                 f"{v.actual:,}",
                 f"{v.overage:,}",
                 _action_label(result, v),
