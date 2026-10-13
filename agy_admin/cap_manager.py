@@ -78,7 +78,10 @@ class CapManager:
                 if isinstance(v, UserCapLimit):
                     normalized_overrides[canon_k] = v.model_dump(exclude_unset=True)
                 elif isinstance(v, dict):
-                    normalized_overrides[canon_k] = v
+                    try:
+                        normalized_overrides[canon_k] = UserCapLimit.model_validate(v).model_dump(exclude_unset=True)
+                    except Exception:
+                        normalized_overrides[canon_k] = v
 
         for user_id, m in metrics.items():
             user_key = normalize_email(user_id or m.user_id)
@@ -94,6 +97,11 @@ class CapManager:
                 override_cfg.get("max_tokens")
                 if is_override and override_cfg.get("max_tokens") is not None
                 else rule.max_tokens
+            )
+            eff_cost = (
+                override_cfg.get("max_cost_usd")
+                if is_override and override_cfg.get("max_cost_usd") is not None
+                else (override_cfg.get("max_usd") if is_override and override_cfg.get("max_usd") is not None else rule.max_cost_usd)
             )
 
             if eff_requests is not None and m.total_requests > eff_requests:
@@ -124,6 +132,23 @@ class CapManager:
                         is_override=is_override and override_cfg.get("max_tokens") is not None,
                     )
                 )
+            if eff_cost is not None and m.estimated_cost_usd > eff_cost:
+                violations.append(
+                    CapViolation(
+                        user_id=user_key,
+                        period=rule.period.value,
+                        metric_type="cost_usd",
+                        limit=eff_cost,
+                        actual=round(m.estimated_cost_usd, 4),
+                        overage=round(m.estimated_cost_usd - eff_cost, 4),
+                        status=m.status,
+                        reason=m.reason,
+                        is_override=is_override and (
+                            override_cfg.get("max_cost_usd") is not None
+                            or override_cfg.get("max_usd") is not None
+                        ),
+                    )
+                )
 
         return violations
 
@@ -136,13 +161,20 @@ class CapManager:
         period: PeriodType = PeriodType.DAILY,
         max_requests: Optional[int] = None,
         max_tokens: Optional[int] = None,
+        max_cost_usd: Optional[float] = None,
         window_type: WindowType = WindowType.CALENDAR,
         disallow_mode: DisallowMode = DisallowMode.CUSTOM_ROLE,
         dry_run: bool = False,
         mock_entries: Optional[List[dict]] = None,
         config_file: Optional[Union[str, Path]] = None,
+        price_file: Optional[Union[str, Path]] = None,
     ) -> EnforceResult:
         result = EnforceResult(period=period.value, dry_run=dry_run)
+
+        target_price_file = price_file or os.environ.get("CAP_PRICE_FILE")
+        if target_price_file and self.logging_client:
+            from agy_admin.pricing import load_price_table
+            self.logging_client.price_table = load_price_table(target_price_file)
 
         cap_config = None
         target_config_file = config_file or os.environ.get("CAP_CONFIG_FILE")
@@ -152,12 +184,24 @@ class CapManager:
                 max_requests = cap_config.default.max_requests
             if cap_config.default.max_tokens is not None:
                 max_tokens = cap_config.default.max_tokens
+            if cap_config.default.max_cost_usd is not None:
+                max_cost_usd = cap_config.default.max_cost_usd
 
-        if max_requests is None and max_tokens is None and (not cap_config or not cap_config.overrides):
+        if (
+            max_requests is None
+            and max_tokens is None
+            and max_cost_usd is None
+            and (not cap_config or not cap_config.overrides)
+        ):
             logger.info("No cap thresholds specified; nothing to enforce.")
             return result
 
-        rule = CapRule(period=period, max_requests=max_requests, max_tokens=max_tokens)
+        rule = CapRule(
+            period=period,
+            max_requests=max_requests,
+            max_tokens=max_tokens,
+            max_cost_usd=max_cost_usd,
+        )
 
         # --- G1: the policy must be readable before anything else -------
         snapshot = self.iam_manager.get_policy_snapshot()
@@ -200,7 +244,13 @@ class CapManager:
                 existing.total_tokens += m.total_tokens
                 existing.total_requests += m.total_requests
                 existing.prompt_tokens += m.prompt_tokens
+                existing.cached_tokens += m.cached_tokens
                 existing.candidates_tokens += m.candidates_tokens
+                existing.thoughts_tokens += m.thoughts_tokens
+                existing.estimated_cost_usd += m.estimated_cost_usd
+                for um in m.unpriced_models:
+                    if um not in existing.unpriced_models:
+                        existing.unpriced_models.append(um)
                 for c in m.clients:
                     if c not in existing.clients:
                         existing.clients.append(c)
@@ -263,6 +313,24 @@ class CapManager:
             )
         )
 
+        # --- Unpriced models warning ------------------------------------
+        if fetch.unpriced_model_counts:
+            policy = (
+                self.logging_client.price_table.unknown_model_policy
+                if self.logging_client and getattr(self.logging_client, "price_table", None)
+                else "max"
+            )
+            breakdown = ", ".join(
+                f"{mdl} ({cnt} req)"
+                for mdl, cnt in sorted(fetch.unpriced_model_counts.items())
+            )
+            warning_msg = (
+                f"Unpriced models detected in window: {breakdown}. "
+                f"Unknown model policy '{policy}' applied."
+            )
+            result.warnings.append(warning_msg)
+            logger.warning(warning_msg)
+
         # --- Decide actions ---------------------------------------------
         violations = self.evaluate_violations(
             metrics,
@@ -285,13 +353,15 @@ class CapManager:
                 continue
             else:
                 unenforceable.append(v)
+                limit_str = f"${v.limit:.4f}" if v.metric_type == "cost_usd" else f"{v.limit:,}"
+                actual_str = f"${v.actual:.4f}" if v.metric_type == "cost_usd" else f"{v.actual:,}"
                 logger.warning(
                     "User %s exceeded the %s cap (limit=%s, actual=%s) but is %s (%s). "
                     "No IAM change was made; manual action is required.",
                     canon_v_uid,
                     v.metric_type,
-                    v.limit,
-                    v.actual,
+                    limit_str,
+                    actual_str,
                     status.value,
                     v.reason.value if v.reason else "-",
                 )
@@ -366,7 +436,7 @@ class CapManager:
 
         # --- Audit --------------------------------------------------------
         self._write_cycle_audit(
-            result, metrics, period, window_type, max_requests, max_tokens, dry_run
+            result, metrics, period, window_type, max_requests, max_tokens, max_cost_usd, dry_run
         )
         return result
 
@@ -426,6 +496,7 @@ class CapManager:
         window_type: WindowType,
         max_requests: Optional[int],
         max_tokens: Optional[int],
+        max_cost_usd: Optional[float],
         dry_run: bool,
     ) -> None:
         base = {
@@ -433,11 +504,14 @@ class CapManager:
             "window_type": window_type.value,
             "cap_tokens": max_tokens,
             "cap_requests": max_requests,
+            "cap_cost_usd": round(max_cost_usd, 4) if max_cost_usd is not None else None,
         }
 
         for uid in result.disallowed_users:
             reasons = [
-                f"{v.metric_type.capitalize()} ({v.actual:,}) exceeded limit ({v.limit:,})"
+                f"Cost (${v.actual:.4f}) exceeded limit (${v.limit:.4f})"
+                if v.metric_type == "cost_usd"
+                else f"{v.metric_type.capitalize()} ({v.actual:,}) exceeded limit ({v.limit:,})"
                 for v in result.violations
                 if v.user_id == uid
             ]
@@ -450,6 +524,7 @@ class CapManager:
                     **base,
                     "actual_tokens": m.total_tokens if m else 0,
                     "actual_requests": m.total_requests if m else 0,
+                    "actual_cost_usd": round(m.estimated_cost_usd, 4) if m else 0.0,
                 },
                 dry_run=dry_run,
                 status=UserStatus.ENFORCEABLE_ALLOWED.value,
@@ -465,6 +540,7 @@ class CapManager:
                     **base,
                     "actual_tokens": m.total_tokens if m else 0,
                     "actual_requests": m.total_requests if m else 0,
+                    "actual_cost_usd": round(m.estimated_cost_usd, 4) if m else 0.0,
                 },
                 dry_run=dry_run,
                 status=UserStatus.CAPPED_BY_TOOL.value,
@@ -472,14 +548,19 @@ class CapManager:
 
         # The honest counterpart: record every violation we could not act on.
         for v in result.unenforceable_violations:
+            if v.metric_type == "cost_usd":
+                reason_text = f"Cost (${v.actual:.4f}) exceeded limit (${v.limit:.4f})"
+                actual_val = round(v.actual, 4) if isinstance(v.actual, float) else v.actual
+                limit_val = round(v.limit, 4) if isinstance(v.limit, float) else v.limit
+            else:
+                reason_text = f"{v.metric_type.capitalize()} ({v.actual:,}) exceeded limit ({v.limit:,})"
+                actual_val = v.actual
+                limit_val = v.limit
             self._audit(
                 v.user_id,
                 AuditAction.DISALLOW_NOT_ENFORCEABLE,
-                (
-                    f"{v.metric_type.capitalize()} ({v.actual:,}) exceeded limit "
-                    f"({v.limit:,}) but access could not be revoked by this tool"
-                ),
-                {**base, "actual": v.actual, "limit": v.limit},
+                f"{reason_text} but access could not be revoked by this tool",
+                {**base, "actual": actual_val, "limit": limit_val},
                 dry_run=dry_run,
                 status=v.status.value,
                 reason_code=v.reason.value if v.reason else None,

@@ -388,9 +388,11 @@ gcloud logging read \
 | `GCP_PROJECT` | - | 대상 Google Cloud 프로젝트 ID |
 | `CAP_PERIOD` | `daily` | 집계 기간 (`daily`, `weekly`, `monthly`) |
 | `WINDOW_TYPE` | `calendar` | 윈도우 계산 방식 (`calendar`: UTC 00:00 기준, `rolling`: 슬라이딩 윈도우) |
+| `CAP_COST_USD` | - | 예상 USD 비용 캡 임계값 (예: `10.0`). 별칭: `CAP_USD` |
 | `CAP_TOKENS` | - | 토큰 캡 임계값 (예: `800000`) |
 | `CAP_REQUESTS` | - | 요청 수 캡 임계값 (예: `1000`) |
 | `CAP_CONFIG_FILE` | - | 기본 한도 및 사용자별 맞춤 한도를 정의한 JSON 파일 경로 (예: `user_caps.json`) |
+| `CAP_PRICE_FILE` | - | 모델 가격표 JSON 파일 경로 (기본 번들 `model_prices.json` 사용) |
 | `IAM_DISALLOW_MODE` | `custom_role` | 차단 방식 (`custom_role` 또는 `revoke`) |
 | `DRY_RUN` | `false` | `true` 설정 시 IAM 변경 없이 시뮬레이션 |
 | `INTERVAL_MINUTES` | `0` | `0`은 1회 실행 후 종료. Cloud Run Jobs에서는 `0`으로 설정 |

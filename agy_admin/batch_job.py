@@ -46,6 +46,7 @@ def _should_notify(result: EnforceResult) -> bool:
         or result.disallowed_users
         or result.allowed_users
         or result.unenforceable_violations
+        or result.warnings
     )
 
 
@@ -81,6 +82,10 @@ def build_alert_lines(result: EnforceResult, project_id: str) -> List[str]:
     if g3 and not g3.passed:
         lines.append(f"- WARNING: {g3.detail}")
 
+    if result.warnings:
+        for w in result.warnings:
+            lines.append(f"- WARNING: {w}")
+
     if result.disallowed_users:
         lines.append(
             f"- Disallowed ({len(result.disallowed_users)}): "
@@ -88,10 +93,16 @@ def build_alert_lines(result: EnforceResult, project_id: str) -> List[str]:
         )
         for v in result.violations:
             if v.enforced:
-                lines.append(
-                    f"    `{v.user_id}`: {v.metric_type} "
-                    f"actual={v.actual:,} > limit={v.limit:,}"
-                )
+                if v.metric_type == "cost_usd":
+                    lines.append(
+                        f"    `{v.user_id}`: {v.metric_type} "
+                        f"actual=${v.actual:.2f} > limit=${v.limit:.2f}"
+                    )
+                else:
+                    lines.append(
+                        f"    `{v.user_id}`: {v.metric_type} "
+                        f"actual={int(v.actual):,} > limit={int(v.limit):,}"
+                    )
 
     if result.unenforceable_violations:
         lines.append(
@@ -100,10 +111,16 @@ def build_alert_lines(result: EnforceResult, project_id: str) -> List[str]:
         )
         for v in result.unenforceable_violations:
             reason = v.reason.value if v.reason else "-"
-            lines.append(
-                f"    `{v.user_id}`: {v.metric_type} actual={v.actual:,} > "
-                f"limit={v.limit:,} [{v.status.value}/{reason}]"
-            )
+            if v.metric_type == "cost_usd":
+                lines.append(
+                    f"    `{v.user_id}`: {v.metric_type} actual=${v.actual:.2f} > "
+                    f"limit=${v.limit:.2f} [{v.status.value}/{reason}]"
+                )
+            else:
+                lines.append(
+                    f"    `{v.user_id}`: {v.metric_type} actual={int(v.actual):,} > "
+                    f"limit={int(v.limit):,} [{v.status.value}/{reason}]"
+                )
 
     if result.allowed_users:
         lines.append(
@@ -144,6 +161,8 @@ def run_enforcement_cycle(
     dry_run: bool,
     webhook_url: Optional[str],
     config_file: Optional[str] = None,
+    cap_cost_usd: Optional[float] = None,
+    price_file: Optional[str] = None,
 ) -> EnforceResult:
     """Executes a single cycle of cap enforcement."""
     logger.info(
@@ -160,6 +179,8 @@ def run_enforcement_cycle(
         period=period,
         max_requests=cap_requests,
         max_tokens=cap_tokens,
+        max_cost_usd=cap_cost_usd,
+        price_file=price_file,
         window_type=window_type,
         disallow_mode=disallow_mode,
         dry_run=dry_run,
@@ -213,11 +234,21 @@ def main() -> None:
     cap_tokens_str = os.environ.get("CAP_TOKENS")
     cap_tokens = int(cap_tokens_str) if cap_tokens_str and cap_tokens_str.isdigit() else None
 
+    cap_cost_usd_str = os.environ.get("CAP_COST_USD") or os.environ.get("CAP_USD")
+    cap_cost_usd = None
+    if cap_cost_usd_str:
+        try:
+            cap_cost_usd = float(cap_cost_usd_str)
+        except ValueError:
+            logger.warning("Invalid CAP_COST_USD '%s', ignoring", cap_cost_usd_str)
+
+    price_file = os.environ.get("CAP_PRICE_FILE")
+
     config_file = os.environ.get("CAP_CONFIG_FILE")
 
-    if cap_requests is None and cap_tokens is None and not config_file:
+    if cap_requests is None and cap_tokens is None and cap_cost_usd is None and not config_file:
         logger.error(
-            "Neither CAP_REQUESTS, CAP_TOKENS, nor CAP_CONFIG_FILE is set; refusing to run a no-op cycle."
+            "Neither CAP_REQUESTS, CAP_TOKENS, CAP_COST_USD, nor CAP_CONFIG_FILE is set; refusing to run a no-op cycle."
         )
         sys.exit(EXIT_CONFIG)
 
@@ -242,6 +273,8 @@ def main() -> None:
             window_type=window_type,
             cap_requests=cap_requests if not config_file else None,
             cap_tokens=cap_tokens if not config_file else None,
+            cap_cost_usd=cap_cost_usd if not config_file else None,
+            price_file=price_file,
             disallow_mode=disallow_mode,
             dry_run=dry_run,
             webhook_url=webhook_url,

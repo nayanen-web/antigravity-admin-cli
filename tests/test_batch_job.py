@@ -259,6 +259,10 @@ def _clear_env(monkeypatch):
         "WINDOW_TYPE",
         "CAP_REQUESTS",
         "CAP_TOKENS",
+        "CAP_COST_USD",
+        "CAP_USD",
+        "CAP_PRICE_FILE",
+        "CAP_CONFIG_FILE",
         "IAM_DISALLOW_MODE",
         "DRY_RUN",
         "ALERT_WEBHOOK_URL",
@@ -385,3 +389,67 @@ def test_cycle_uses_cap_marker_so_users_can_recover(monkeypatch):
 
     cap_role = f"projects/{PROJECT}/roles/{DEFAULT_CAP_ROLE_ID}"
     assert "user:heavy@corp.com" in bindings[cap_role]
+
+
+def test_alert_formats_cost_violations_and_warnings():
+    cost_viol = CapViolation(
+        user_id="alice@corp.com",
+        period="daily",
+        metric_type="cost_usd",
+        limit=10.0,
+        actual=12.3123,
+        overage=2.3123,
+        status=UserStatus.ENFORCEABLE_ALLOWED,
+        enforced=True,
+    )
+    unenforceable_cost_viol = CapViolation(
+        user_id="boss@corp.com",
+        period="daily",
+        metric_type="cost_usd",
+        limit=10.0,
+        actual=15.5,
+        overage=5.5,
+        status=UserStatus.NOT_ENFORCEABLE,
+        reason=ReasonCode.PRIVILEGED_ROLE,
+        enforced=False,
+    )
+    result = EnforceResult(
+        period="daily",
+        evaluated_users_count=2,
+        coverage=Coverage(total_evaluated=2, enforceable=1, not_enforceable=1, coverage_ratio=0.5),
+        violations=[cost_viol, unenforceable_cost_viol],
+        unenforceable_violations=[unenforceable_cost_viol],
+        disallowed_users=["alice@corp.com"],
+        warnings=[
+            "Unpriced model 'custom-model' observed (5 requests). Estimated at $0.00 under policy 'skip'."
+        ],
+    )
+    lines = build_alert_lines(result, "test-proj")
+    text = "\n".join(lines)
+    assert "`alice@corp.com`: cost_usd actual=$12.31 > limit=$10.00" in text
+    assert "`boss@corp.com`: cost_usd actual=$15.50 > limit=$10.00 [NOT_ENFORCEABLE/PRIVILEGED_ROLE]" in text
+    assert "WARNING: Unpriced model 'custom-model' observed (5 requests)" in text
+
+
+def test_main_parses_cap_cost_usd_and_price_file(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("GCP_PROJECT", "env-test-proj")
+    monkeypatch.setenv("CAP_COST_USD", "15.50")
+    monkeypatch.setenv("CAP_PRICE_FILE", "/path/to/custom_prices.json")
+
+    calls = []
+
+    def mock_cycle(**kwargs):
+        calls.append(kwargs)
+        return EnforceResult(period="daily", dry_run=False)
+
+    monkeypatch.setattr("agy_admin.batch_job.run_enforcement_cycle", mock_cycle)
+
+    main()
+
+    assert len(calls) == 1
+    args = calls[0]
+    assert args["project_id"] == "env-test-proj"
+    assert args["cap_cost_usd"] == 15.50
+    assert args["price_file"] == "/path/to/custom_prices.json"
+

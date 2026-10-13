@@ -1,13 +1,15 @@
 {
   "default": {
+    "max_cost_usd": 10.0,
     "max_tokens": 5000000,
     "max_requests": 1000
   },
   "overrides": {
     "user@example.com": {
-      "max_tokens": 15000000
+      "max_cost_usd": 15.0
     },
     "lead@example.com": {
+      "max_cost_usd": 25.0,
       "max_tokens": 25000000,
       "max_requests": 5000
     }

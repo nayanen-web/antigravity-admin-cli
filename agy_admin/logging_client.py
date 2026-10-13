@@ -4,10 +4,11 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from agy_admin.iam_manager import normalize_email
 from agy_admin.models import AuditAction, PeriodType, UserMetric, WindowType
+from agy_admin.pricing import PriceTable, estimate_entry_cost, get_default_price_table
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class MetricsFetchResult:
     entry_count: int = 0
     query_ok: bool = True
     error: str = ""
+    unpriced_model_counts: Dict[str, int] = field(default_factory=dict)
 
     @property
     def healthy(self) -> bool:
@@ -96,9 +98,15 @@ def _to_int(value) -> int:
 
 
 class LoggingMetricsClient:
-    def __init__(self, project_id: str, client=None):
+    def __init__(
+        self,
+        project_id: str,
+        client=None,
+        price_table: Optional[PriceTable] = None,
+    ):
         self.project_id = project_id
         self._client = client
+        self.price_table = price_table or get_default_price_table()
 
     def _get_client(self):
         if self._client is None:
@@ -123,11 +131,19 @@ class LoggingMetricsClient:
         start_time, end_time = calculate_time_range(period, window_type, now=now)
 
         if mock_entries is not None:
+            unpriced_counts: Dict[str, int] = {}
             metrics = self._aggregate_from_entries(
-                mock_entries, start_time, end_time, user_ids
+                mock_entries,
+                start_time,
+                end_time,
+                user_ids,
+                unpriced_counts=unpriced_counts,
             )
             return MetricsFetchResult(
-                metrics=metrics, entry_count=len(mock_entries), query_ok=True
+                metrics=metrics,
+                entry_count=len(mock_entries),
+                query_ok=True,
+                unpriced_model_counts=unpriced_counts,
             )
 
         return self._query_cloud_logging(start_time, end_time, user_ids)
@@ -215,13 +231,27 @@ class LoggingMetricsClient:
             if isinstance(payload, dict):
                 metadata = payload.get("metadata") or {}
 
+            model_name = _label_model(labels)
+            cost_usd, priced = estimate_entry_cost(
+                model=model_name,
+                metadata=metadata,
+                ts=entry.timestamp,
+                price_table=self.price_table,
+            )
+            if not priced:
+                result.unpriced_model_counts[model_name] = (
+                    result.unpriced_model_counts.get(model_name, 0) + 1
+                )
+
             self._accumulate(
                 result.metrics,
                 user_id=canonical_user_id,
                 client_name=labels.get("client_name") or "unknown_client",
-                model=_label_model(labels),
+                model=model_name,
                 metadata=metadata,
                 ts=entry.timestamp,
+                cost_usd=cost_usd,
+                priced=priced,
             )
 
         return result
@@ -232,6 +262,7 @@ class LoggingMetricsClient:
         start_time: datetime,
         end_time: datetime,
         user_ids: Optional[List[str]] = None,
+        unpriced_counts: Optional[Dict[str, int]] = None,
     ) -> Dict[str, UserMetric]:
         """Aggregate helper for mock entries or test fixtures."""
         metrics: Dict[str, UserMetric] = {}
@@ -253,42 +284,96 @@ class LoggingMetricsClient:
                 continue
 
             payload = entry.get("jsonPayload", {})
+            metadata = payload.get("metadata", {})
+            model_name = _label_model(labels)
+            cost_usd, priced = estimate_entry_cost(
+                model=model_name,
+                metadata=metadata,
+                ts=ts,
+                price_table=self.price_table,
+            )
+            if not priced and unpriced_counts is not None:
+                unpriced_counts[model_name] = (
+                    unpriced_counts.get(model_name, 0) + 1
+                )
+
             self._accumulate(
                 metrics,
                 user_id=canonical_user_id,
                 client_name=labels.get("client_name") or "unknown_client",
-                model=_label_model(labels),
-                metadata=payload.get("metadata", {}),
+                model=model_name,
+                metadata=metadata,
                 ts=ts,
+                cost_usd=cost_usd,
+                priced=priced,
             )
 
         return metrics
 
-    @staticmethod
     def _accumulate(
+        self,
         metrics: Dict[str, UserMetric],
         user_id: str,
         client_name: str,
         model: str,
         metadata: dict,
         ts,
+        cost_usd: Optional[float] = None,
+        priced: Optional[bool] = None,
     ) -> None:
-        total_tokens = _to_int(metadata.get("totalTokenCount", 0))
-        prompt_tokens = _to_int(metadata.get("promptTokenCount", 0))
-        candidates_tokens = _to_int(metadata.get("candidatesTokenCount", 0))
+        if isinstance(self, dict):
+            # Called as LoggingMetricsClient._accumulate(metrics, user_id, client_name, model, metadata, ts)
+            metrics_dict = self
+            uid = str(metrics)
+            cname = user_id
+            mdl = client_name
+            meta = model if isinstance(model, dict) else {}
+            entry_ts = metadata
+            pt = None
+        else:
+            metrics_dict = metrics
+            uid = user_id
+            cname = client_name
+            mdl = model
+            meta = metadata
+            entry_ts = ts
+            pt = getattr(self, "price_table", None)
 
-        m = metrics.get(user_id)
+        total_tokens = _to_int(meta.get("totalTokenCount", 0))
+        prompt_tokens = _to_int(meta.get("promptTokenCount", 0))
+        candidates_tokens = _to_int(meta.get("candidatesTokenCount", 0))
+        cached_tokens = _to_int(meta.get("cachedContentTokenCount", 0))
+        thoughts_tokens = _to_int(meta.get("thoughtsTokenCount", 0))
+
+        if cost_usd is None or priced is None:
+            c, p = estimate_entry_cost(
+                model=mdl,
+                metadata=meta,
+                ts=entry_ts,
+                price_table=pt,
+            )
+            if cost_usd is None:
+                cost_usd = c
+            if priced is None:
+                priced = p
+
+        m = metrics_dict.get(uid)
         if m is None:
-            metrics[user_id] = UserMetric(
-                user_id=user_id,
+            unpriced = [mdl] if not priced else []
+            metrics_dict[uid] = UserMetric(
+                user_id=uid,
                 total_requests=1,
                 total_tokens=total_tokens,
                 prompt_tokens=prompt_tokens,
                 candidates_tokens=candidates_tokens,
-                clients=[client_name] if client_name != "unknown_client" else [],
-                models=[model] if model != "unknown_model" else [],
-                first_active=ts,
-                last_active=ts,
+                cached_tokens=cached_tokens,
+                thoughts_tokens=thoughts_tokens,
+                estimated_cost_usd=cost_usd,
+                clients=[cname] if cname != "unknown_client" else [],
+                models=[mdl] if mdl != "unknown_model" else [],
+                unpriced_models=unpriced,
+                first_active=entry_ts,
+                last_active=entry_ts,
             )
             return
 
@@ -296,15 +381,20 @@ class LoggingMetricsClient:
         m.total_tokens += total_tokens
         m.prompt_tokens += prompt_tokens
         m.candidates_tokens += candidates_tokens
-        if client_name != "unknown_client" and client_name not in m.clients:
-            m.clients.append(client_name)
-        if model != "unknown_model" and model not in m.models:
-            m.models.append(model)
-        if ts:
-            if m.first_active is None or ts < m.first_active:
-                m.first_active = ts
-            if m.last_active is None or ts > m.last_active:
-                m.last_active = ts
+        m.cached_tokens += cached_tokens
+        m.thoughts_tokens += thoughts_tokens
+        m.estimated_cost_usd += cost_usd
+        if cname != "unknown_client" and cname not in m.clients:
+            m.clients.append(cname)
+        if mdl != "unknown_model" and mdl not in m.models:
+            m.models.append(mdl)
+        if not priced and mdl not in m.unpriced_models:
+            m.unpriced_models.append(mdl)
+        if entry_ts:
+            if m.first_active is None or entry_ts < m.first_active:
+                m.first_active = entry_ts
+            if m.last_active is None or entry_ts > m.last_active:
+                m.last_active = entry_ts
 
     # ------------------------------------------------------------------
     # Audit trail
@@ -343,7 +433,7 @@ class LoggingMetricsClient:
         try:
             client = self._get_client()
             if hasattr(client, "logger"):
-                cloud_logger = client.logger("agy-admin/admin_actions")
+                cloud_logger = client.logger("agy-admin%2Fadmin_actions")
                 cloud_logger.log_struct(
                     {k: v for k, v in payload.items() if k != "written"},
                     severity="INFO" if dry_run else "NOTICE",

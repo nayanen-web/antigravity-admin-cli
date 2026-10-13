@@ -22,6 +22,8 @@ SERVICE_ACCOUNT="agy-admin-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 CAP_PERIOD="${CAP_PERIOD:-daily}"
 CAP_REQUESTS="${CAP_REQUESTS-1000}"
 CAP_TOKENS="${CAP_TOKENS-1000000}"
+CAP_COST_USD="${CAP_COST_USD:-}"
+CAP_PRICE_FILE="${CAP_PRICE_FILE:-}"
 WINDOW_TYPE="${WINDOW_TYPE:-calendar}"
 IAM_DISALLOW_MODE="${IAM_DISALLOW_MODE:-custom_role}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -109,6 +111,12 @@ else
   if [[ -n "${CAP_TOKENS}" ]]; then
     ENV_VARS="${ENV_VARS},CAP_TOKENS=${CAP_TOKENS}"
   fi
+  if [[ -n "${CAP_COST_USD}" ]]; then
+    ENV_VARS="${ENV_VARS},CAP_COST_USD=${CAP_COST_USD}"
+  fi
+fi
+if [[ -n "${CAP_PRICE_FILE}" ]]; then
+  ENV_VARS="${ENV_VARS},CAP_PRICE_FILE=${CAP_PRICE_FILE}"
 fi
 if [[ -n "${ALERT_WEBHOOK_URL}" ]]; then
   ENV_VARS="${ENV_VARS},ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}"

@@ -60,7 +60,11 @@ def format_user_metrics(
             "total_requests",
             "total_tokens",
             "prompt_tokens",
+            "cached_tokens",
             "candidates_tokens",
+            "thoughts_tokens",
+            "estimated_cost_usd",
+            "unpriced_models",
             "clients",
             "models",
             "first_active",
@@ -90,6 +94,11 @@ def format_user_metrics(
         justify="right",
         footer=f"{sum(m.total_tokens for m in metrics):,}",
     )
+    table.add_column(
+        "Est. Cost (USD)",
+        justify="right",
+        footer=f"${sum(m.estimated_cost_usd for m in metrics):.4f}",
+    )
     table.add_column("Clients", justify="left")
     table.add_column("Models", justify="left")
     table.add_column("Last Active", justify="center")
@@ -100,6 +109,7 @@ def format_user_metrics(
             _status_cell(m),
             f"{m.total_requests:,}",
             f"{m.total_tokens:,}",
+            f"${m.estimated_cost_usd:.4f}",
             ", ".join(m.clients) if m.clients else "-",
             ", ".join(m.models) if m.models else "-",
             m.last_active.strftime("%Y-%m-%d %H:%M:%S") if m.last_active else "-",
@@ -199,6 +209,9 @@ def format_enforce_result(
     if g3 and not g3.passed:
         renderables.append(f"[bold yellow][WARNING][/bold yellow] {g3.detail}")
 
+    for w in result.warnings:
+        renderables.append(f"[bold yellow][WARNING][/bold yellow] {w}")
+
     cov = result.coverage
     ratio = f"{cov.coverage_ratio * 100:.1f}%" if cov.total_evaluated else "-"
     renderables.append(
@@ -228,14 +241,22 @@ def format_enforce_result(
         table.add_column("Overage", justify="right")
         table.add_column("Action Taken", justify="left")
         for v in result.violations:
-            limit_str = f"{v.limit:,} (override)" if getattr(v, "is_override", False) else f"{v.limit:,}"
+            if v.metric_type == "cost_usd":
+                limit_fmt = f"${v.limit:.2f}"
+                limit_str = f"{limit_fmt} (override)" if getattr(v, "is_override", False) else limit_fmt
+                actual_str = f"${v.actual:.2f}"
+                overage_str = f"${v.overage:.2f}"
+            else:
+                limit_str = f"{v.limit:,} (override)" if getattr(v, "is_override", False) else f"{v.limit:,}"
+                actual_str = f"{v.actual:,}"
+                overage_str = f"{v.overage:,}"
             table.add_row(
                 v.user_id,
                 v.period,
                 v.metric_type,
                 limit_str,
-                f"{v.actual:,}",
-                f"{v.overage:,}",
+                actual_str,
+                overage_str,
                 _action_label(result, v),
             )
         renderables.append(table)
@@ -252,11 +273,17 @@ def format_enforce_result(
         table.add_column("State")
         table.add_column("Reason")
         for v in result.unenforceable_violations:
+            if v.metric_type == "cost_usd":
+                actual_str = f"${v.actual:.2f}"
+                limit_str = f"${v.limit:.2f}"
+            else:
+                actual_str = f"{v.actual:,}"
+                limit_str = f"{v.limit:,}"
             table.add_row(
                 v.user_id,
                 v.metric_type,
-                f"{v.actual:,}",
-                f"{v.limit:,}",
+                actual_str,
+                limit_str,
                 v.status.value,
                 v.reason.value if v.reason else "-",
             )

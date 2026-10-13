@@ -1,0 +1,101 @@
+{
+  "currency": "USD",
+  "unknown_model_policy": "max",
+  "models": {
+    "gemini-3.8-flash": [
+      {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 3.75},
+      {"effective_from": "2027-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
+    "gemini-3.7-flash": [
+      {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 3.75},
+      {"effective_from": "2027-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
+    "gemini-3.6-flash": [
+      {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 3.75},
+      {"effective_from": "2027-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
+    "gemini-3.5-flash": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 9.00}
+    ],
+    "gemini-3.5-flash-lite": [
+      {"effective_from": "2026-01-01", "input": 0.30, "cached": 0.03, "output": 2.50}
+    ],
+    "gemini-3.1-flash-lite": [
+      {"effective_from": "2026-01-01", "input": 0.25, "cached": 0.025, "output": 1.50}
+    ],
+    "gemini-3.1-pro-preview": [
+      {
+        "effective_from": "2026-01-01",
+        "input": 2.00,
+        "cached": 0.20,
+        "output": 12.00,
+        "long_context_threshold": 200000,
+        "input_long": 4.00,
+        "cached_long": 0.40,
+        "output_long": 18.00
+      }
+    ],
+    "gemini-3-pro-image": [
+      {
+        "effective_from": "2026-01-01",
+        "input": 2.00,
+        "cached": 0.20,
+        "output": 12.00,
+        "image_output": 120.00
+      }
+    ],
+    "gemini-3-flash-preview": [
+      {"effective_from": "2026-01-01", "input": 0.50, "cached": 0.05, "output": 3.00}
+    ],
+    "gemini-3.1-flash-image": [
+      {"effective_from": "2026-01-01", "input": 0.50, "cached": 0.05, "output": 3.00, "image_output": 60.00}
+    ],
+    "gemini-3.1-flash-lite-image": [
+      {"effective_from": "2026-01-01", "input": 0.25, "cached": 0.025, "output": 1.50, "image_output": 30.00}
+    ],
+    "gemini-nano-banana-2.1": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50, "image_output": 30.00}
+    ],
+    "gemini-omni-1.1-flash": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 9.00}
+    ],
+    "gemini-omni-flash-preview": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 9.00}
+    ],
+    "gemini-2.5-pro": [
+      {
+        "effective_from": "2026-01-01",
+        "input": 1.25,
+        "cached": 0.125,
+        "output": 10.00,
+        "long_context_threshold": 200000,
+        "input_long": 2.50,
+        "cached_long": 0.25,
+        "output_long": 15.00
+      }
+    ],
+    "gemini-2.5-flash": [
+      {"effective_from": "2026-01-01", "input": 0.30, "cached": 0.03, "output": 2.50}
+    ],
+    "gemini-2.5-flash-lite": [
+      {"effective_from": "2026-01-01", "input": 0.10, "cached": 0.01, "output": 0.40}
+    ],
+    "gemini-robotics-er-2-preview": [
+      {"effective_from": "2026-01-01", "input": 1.00, "cached": 0.10, "output": 5.00},
+      {"effective_from": "2027-01-01", "input": 2.00, "cached": 0.20, "output": 10.00}
+    ],
+    "gemini-robotics-er-2-streaming-preview": [
+      {"effective_from": "2026-01-01", "input": 1.00, "cached": 0.10, "output": 5.00},
+      {"effective_from": "2027-01-01", "input": 2.00, "cached": 0.20, "output": 10.00}
+    ],
+    "gemini-embedding-2": [
+      {"effective_from": "2026-01-01", "input": 0.20, "cached": 0.02, "output": 0.0}
+    ],
+    "gemini-2.0-flash": [
+      {"effective_from": "2026-01-01", "input": 0.10, "cached": 0.025, "output": 0.40}
+    ],
+    "gemini-2.0-flash-lite": [
+      {"effective_from": "2026-01-01", "input": 0.075, "cached": 0.01875, "output": 0.30}
+    ]
+  }
+}

@@ -143,7 +143,7 @@ def _filter_and_sort_metrics(
     max_requests: Optional[int] = None,
     min_tokens: Optional[int] = None,
     max_tokens: Optional[int] = None,
-    order_by: OrderByField = OrderByField.TOKENS,
+    order_by: OrderByField = OrderByField.COST,
     direction: OrderDirection = OrderDirection.DESC,
 ) -> List[UserMetric]:
     filtered = []
@@ -177,6 +177,8 @@ def _filter_and_sort_metrics(
         filtered.sort(key=lambda x: x.total_tokens, reverse=reverse)
     elif order_by == OrderByField.REQUESTS:
         filtered.sort(key=lambda x: x.total_requests, reverse=reverse)
+    elif order_by == OrderByField.COST:
+        filtered.sort(key=lambda x: x.estimated_cost_usd, reverse=reverse)
     elif order_by == OrderByField.USER:
         filtered.sort(key=lambda x: x.user_id.lower(), reverse=reverse)
     elif order_by == OrderByField.LAST_ACTIVE:
@@ -251,7 +253,7 @@ def list_users(
         None, "--max-tokens", help="Filter by maximum token count"
     ),
     order_by: OrderByField = typer.Option(
-        OrderByField.TOKENS, "--order-by", help="Field to sort by: tokens, requests, user, last_active"
+        OrderByField.COST, "--order-by", help="Field to sort by: cost, tokens, requests, user, last_active"
     ),
     direction: OrderDirection = typer.Option(
         OrderDirection.DESC, "--direction", help="Sort direction: asc or desc"
@@ -259,12 +261,28 @@ def list_users(
     output_format: OutputFormat = typer.Option(
         OutputFormat.TEXT, "--format", "-f", help="Output format: text, json, csv"
     ),
+    price_file: Optional[Path] = typer.Option(
+        None, "--price-file", help="Path to JSON file containing model pricing table"
+    ),
 ):
     """List per-user Antigravity usage metrics (requests, tokens, status) from Cloud Logging."""
     filter_status = _validate_filter_status(filter_status)
 
+    if price_file is not None and not price_file.exists():
+        typer.echo(f"Error: Price file not found: {price_file}", err=True)
+        raise typer.Exit(code=1)
+
+    price_table = None
+    if price_file:
+        try:
+            from agy_admin.pricing import load_price_table
+            price_table = load_price_table(price_file)
+        except Exception as e:
+            typer.echo(f"Error loading price file: {e}", err=True)
+            raise typer.Exit(code=1)
+
     settings = get_settings(project)
-    logging_client = LoggingMetricsClient(settings.project_id)
+    logging_client = LoggingMetricsClient(settings.project_id, price_table=price_table)
     iam_manager = build_iam_manager(settings)
 
     fetch = logging_client.fetch_metrics(period=period, window_type=window)
@@ -313,12 +331,28 @@ def show_user(
     output_format: OutputFormat = typer.Option(
         OutputFormat.TEXT, "--format", "-f", help="Output format: text, json, csv"
     ),
+    price_file: Optional[Path] = typer.Option(
+        None, "--price-file", help="Path to JSON file containing model pricing table"
+    ),
 ):
     """View detailed usage metrics and access status for specific user(s)."""
     target_users = _collect_targets(user_ids, file)
 
+    if price_file is not None and not price_file.exists():
+        typer.echo(f"Error: Price file not found: {price_file}", err=True)
+        raise typer.Exit(code=1)
+
+    price_table = None
+    if price_file:
+        try:
+            from agy_admin.pricing import load_price_table
+            price_table = load_price_table(price_file)
+        except Exception as e:
+            typer.echo(f"Error loading price file: {e}", err=True)
+            raise typer.Exit(code=1)
+
     settings = get_settings(project)
-    logging_client = LoggingMetricsClient(settings.project_id)
+    logging_client = LoggingMetricsClient(settings.project_id, price_table=price_table)
     iam_manager = build_iam_manager(settings)
 
     fetch = logging_client.fetch_metrics(
@@ -436,6 +470,12 @@ def apply_caps(
     tokens: Optional[int] = typer.Option(
         None, "--tokens", help="Maximum total token count threshold"
     ),
+    cost_usd: Optional[float] = typer.Option(
+        None, "--cost-usd", help="Maximum estimated USD cost threshold"
+    ),
+    price_file: Optional[Path] = typer.Option(
+        None, "--price-file", help="Path to model prices JSON file (defaults to bundled list price)"
+    ),
     window: WindowType = typer.Option(
         WindowType.CALENDAR, "--window", help="Window calculation type: calendar or rolling"
     ),
@@ -459,12 +499,20 @@ def apply_caps(
         typer.echo("Error: Cap period cannot be 'all'. Choose daily, weekly, or monthly.", err=True)
         raise typer.Exit(code=1)
 
+    if cost_usd is not None and cost_usd < 0:
+        typer.echo("Error: --cost-usd must be non-negative.", err=True)
+        raise typer.Exit(code=1)
+
+    if price_file is not None and not price_file.exists():
+        typer.echo(f"Error: Price file not found: {price_file}", err=True)
+        raise typer.Exit(code=1)
+
     if config_file is not None and not config_file.exists():
         typer.echo(f"Error: Cap config file not found: {config_file}", err=True)
         raise typer.Exit(code=1)
 
-    if requests is None and tokens is None and config_file is None:
-        typer.echo("Error: Please specify at least --requests, --tokens limit, or --config-file.", err=True)
+    if requests is None and tokens is None and cost_usd is None and config_file is None:
+        typer.echo("Error: Please specify at least --requests, --tokens limit, or --config-file (or --cost-usd).", err=True)
         raise typer.Exit(code=1)
 
     settings = get_settings(project)
@@ -475,6 +523,8 @@ def apply_caps(
         period=period,
         max_requests=requests,
         max_tokens=tokens,
+        max_cost_usd=cost_usd,
+        price_file=price_file,
         window_type=window,
         disallow_mode=mode,
         dry_run=dry_run,

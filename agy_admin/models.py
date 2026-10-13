@@ -2,8 +2,8 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Union
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class UserStatus(str, Enum):
@@ -124,6 +124,7 @@ class OrderByField(str, Enum):
     REQUESTS = "requests"
     USER = "user"
     LAST_ACTIVE = "last_active"
+    COST = "cost"
 
 
 class OrderDirection(str, Enum):
@@ -152,8 +153,12 @@ class UserMetric(BaseModel):
     total_tokens: int = 0
     prompt_tokens: int = 0
     candidates_tokens: int = 0
+    cached_tokens: int = 0
+    thoughts_tokens: int = 0
+    estimated_cost_usd: float = 0.0
     clients: List[str] = Field(default_factory=list)
     models: List[str] = Field(default_factory=list)
+    unpriced_models: List[str] = Field(default_factory=list)
     first_active: Optional[datetime] = None
     last_active: Optional[datetime] = None
 
@@ -166,22 +171,36 @@ class UserMetric(BaseModel):
             "total_tokens": self.total_tokens,
             "prompt_tokens": self.prompt_tokens,
             "candidates_tokens": self.candidates_tokens,
+            "cached_tokens": self.cached_tokens,
+            "thoughts_tokens": self.thoughts_tokens,
+            "estimated_cost_usd": self.estimated_cost_usd,
             "clients": ", ".join(self.clients) if self.clients else "-",
             "models": ", ".join(self.models) if self.models else "-",
+            "unpriced_models": ", ".join(self.unpriced_models) if self.unpriced_models else "-",
             "first_active": self.first_active.isoformat() if self.first_active else "-",
             "last_active": self.last_active.isoformat() if self.last_active else "-",
         }
 
 
 class CapRule(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     period: PeriodType
     max_requests: Optional[int] = None
     max_tokens: Optional[int] = None
+    max_cost_usd: Optional[float] = Field(
+        None, ge=0, validation_alias=AliasChoices("max_cost_usd", "max_usd")
+    )
 
 
 class UserCapLimit(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     max_tokens: Optional[int] = None
     max_requests: Optional[int] = None
+    max_cost_usd: Optional[float] = Field(
+        None, ge=0, validation_alias=AliasChoices("max_cost_usd", "max_usd")
+    )
 
 
 class CapConfigFile(BaseModel):
@@ -193,9 +212,9 @@ class CapViolation(BaseModel):
     user_id: str
     period: str
     metric_type: str
-    limit: int
-    actual: int
-    overage: int
+    limit: Union[int, float]
+    actual: Union[int, float]
+    overage: Union[int, float]
     detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # Populated during enforcement so reports can distinguish "blocked" from
     # "detected but could not be blocked".
@@ -279,6 +298,7 @@ class EnforceResult(BaseModel):
     aborted: bool = False
     abort_reason: str = ""
     dry_run: bool = False
+    warnings: List[str] = Field(default_factory=list)
 
     @property
     def violations_total(self) -> int:

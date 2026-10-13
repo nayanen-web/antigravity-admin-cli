@@ -213,7 +213,8 @@ agy-admin-cli --help
 
 ### 1) View Usage Metrics (`list`)
 ```bash
-# Current calendar month, sorted by token count
+```bash
+# Current calendar month, sorted by estimated cost (default)
 agy-admin-cli list --project <PROJECT_ID>
 
 # Specify period (daily, weekly, monthly, all)
@@ -221,6 +222,9 @@ agy-admin-cli list --period daily --project <PROJECT_ID>
 
 # Sliding 24-hour window
 agy-admin-cli list --period daily --window rolling --project <PROJECT_ID>
+
+# Sort by tokens, requests, or cost
+agy-admin-cli list --order-by cost --project <PROJECT_ID>
 
 # Filter by username, state, or minimum token threshold
 # Allowed status filters: all, ENFORCEABLE_ALLOWED, CAPPED_BY_TOOL,
@@ -230,7 +234,7 @@ agy-admin-cli list --filter-user "devuser01" --filter-status ENFORCEABLE_ALLOWED
 # View users that cannot be managed automatically
 agy-admin-cli list --filter-status NOT_ENFORCEABLE --project <PROJECT_ID>
 
-# Export to JSON or CSV
+# Export to JSON or CSV (includes Est. Cost (USD), cached tokens, thoughts tokens)
 agy-admin-cli list --format json --project <PROJECT_ID>
 agy-admin-cli list --format csv --project <PROJECT_ID>
 ```
@@ -286,34 +290,39 @@ Once the group membership or role has been removed, re-run `agy-admin-cli user <
 
 ### 4) Evaluate and Apply Caps (`cap apply`)
 ```bash
+# Daily cap of $10.00 estimated USD cost
+agy-admin-cli cap apply --period daily --cost-usd 10.0 --project <PROJECT_ID>
+
 # Daily cap of 500,000 tokens
 agy-admin-cli cap apply --period daily --tokens 500000 --project <PROJECT_ID>
 
 # Daily rolling window cap of 800,000 tokens
 agy-admin-cli cap apply --period daily --window rolling --tokens 800000 --project <PROJECT_ID>
 
-# Combined request and token caps
-agy-admin-cli cap apply --period daily --requests 1000 --tokens 500000 --project <PROJECT_ID>
+# Combined cost, token, and request caps
+agy-admin-cli cap apply --period daily --cost-usd 10.0 --tokens 500000 --requests 1000 --project <PROJECT_ID>
 
 # Apply default caps with user-specific overrides from JSON file
 agy-admin-cli cap apply --period monthly --config-file user_caps.json --project <PROJECT_ID>
 
 # Preview cap evaluation without changing IAM
-agy-admin-cli cap apply --period daily --tokens 500000 --dry-run --project <PROJECT_ID>
+agy-admin-cli cap apply --period daily --cost-usd 10.0 --dry-run --project <PROJECT_ID>
 ```
 
 #### User-Specific Cap Overrides (`user_caps.json`)
-You can define default limits alongside custom limits for specific users (e.g. VIPs, team leads):
+You can define default limits alongside custom limits for specific users (e.g. VIPs, team leads) using `max_usd` (or `max_cost_usd`), `max_tokens`, and `max_requests`:
 ```json
 {
   "default": {
+    "max_usd": 10.0,
     "max_tokens": 5000000
   },
   "overrides": {
     "user@example.com": {
-      "max_tokens": 15000000
+      "max_usd": 25.0
     },
     "lead@example.com": {
+      "max_usd": 50.0,
       "max_tokens": 25000000
     }
   }
@@ -321,11 +330,25 @@ You can define default limits alongside custom limits for specific users (e.g. V
 ```
 * Users listed in `overrides` are evaluated against their custom limits.
 * All other users fall back to `default`.
-* Email matching is case-insensitive.
+* Email matching is case-insensitive and normalizes `user:` prefixes.
+
+#### Estimated Dollar Cost Formula & Pricing Table
+Cost is evaluated **per log entry before aggregation**, not after summing tokens:
+```
+uncached_in = max(0, prompt - cached)
+cost = (uncached_in * input_rate + cached * cached_rate + (candidates + thoughts) * output_rate) / 1,000,000
+```
+- **Thinking tokens**: `thoughtsTokenCount` is billed at `output_rate`.
+- **Image models**: If `image_output` rate exists, `candidates` is billed at `image_output`, `thoughts` at `output_rate`.
+- **Long-context tier**: If `prompt > long_context_threshold`, all tokens for that entry use the `*_long` rates.
+- **Date switching**: Rates are picked where `effective_from <= entry_timestamp` (latest wins, automatically applying price updates like the Jan 1, 2027 Flash schedule).
+- **Price table**: Bundled in `agy_admin/model_prices.json` (Vertex AI global list price). Can be overridden via `--price-file` or `CAP_PRICE_FILE`.
+- **Unknown models**: Governed by `unknown_model_policy` (`"max"` prices at the most expensive known model; `"skip"` ignores cost). Unpriced models are reported in warnings and alert webhooks.
+- **Note on Estimation**: This is an **estimate at list price**. Actual GCP billing may differ (e.g. enterprise license quota coverage when `quotaType=REGULAR_QUOTA`). Maintain the pricing table as models and prices evolve.
 
 The report includes:
 1. **Cap Enforcement Summary**: Coverage ratio, applied blocks, and manual review counts
-2. **Cap Violations**: Per-user action outcomes (`DISALLOWED`, `ALREADY CAPPED`, or `NOT ENFORCEABLE`)
+2. **Cap Violations**: Per-user action outcomes (`DISALLOWED`, `ALREADY CAPPED`, or `NOT ENFORCEABLE`) with formatted limit and actual cost/tokens
 3. **Manual Action Required**: Violators who cannot be managed via direct project bindings
 
 ### 5) Exit Codes
@@ -388,9 +411,11 @@ gcloud logging read \
 | `GCP_PROJECT` | - | Target Google Cloud project ID |
 | `CAP_PERIOD` | `daily` | Aggregation period (`daily`, `weekly`, `monthly`) |
 | `WINDOW_TYPE` | `calendar` | Window calculation (`calendar` or `rolling`) |
+| `CAP_COST_USD` | - | Estimated USD cost cap threshold (e.g. `10.0`). Alias: `CAP_USD` |
 | `CAP_TOKENS` | - | Token cap threshold (e.g. `800000`) |
 | `CAP_REQUESTS` | - | Request count threshold (e.g. `1000`) |
 | `CAP_CONFIG_FILE` | - | Path to JSON file defining default limits and per-user overrides (e.g. `user_caps.json`) |
+| `CAP_PRICE_FILE` | - | Path to custom model prices JSON file (defaults to bundled `model_prices.json`) |
 | `IAM_DISALLOW_MODE` | `custom_role` | Restriction mode (`custom_role` or `revoke`) |
 | `DRY_RUN` | `false` | When `true`, evaluates without modifying IAM |
 | `INTERVAL_MINUTES` | `0` | `0` executes once and exits. Set to `0` when deployed as a Cloud Run Job |

@@ -137,7 +137,7 @@ def test_write_audit_log():
         dry_run=False,
     )
 
-    mock_client.logger.assert_called_with("agy-admin/admin_actions")
+    mock_client.logger.assert_called_with("agy-admin%2Fadmin_actions")
     mock_logger.log_struct.assert_called_once()
 
     call_args = mock_logger.log_struct.call_args
