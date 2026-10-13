@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
+from agy_admin.iam_manager import normalize_email
 from agy_admin.models import AuditAction, PeriodType, UserMetric, WindowType
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,7 @@ class LoggingMetricsClient:
             if not user_id:
                 continue
 
+            canonical_user_id = normalize_email(user_id)
             payload = entry.payload
             metadata = {}
             if isinstance(payload, dict):
@@ -215,7 +217,7 @@ class LoggingMetricsClient:
 
             self._accumulate(
                 result.metrics,
-                user_id=user_id,
+                user_id=canonical_user_id,
                 client_name=labels.get("client_name") or "unknown_client",
                 model=_label_model(labels),
                 metadata=metadata,
@@ -233,7 +235,7 @@ class LoggingMetricsClient:
     ) -> Dict[str, UserMetric]:
         """Aggregate helper for mock entries or test fixtures."""
         metrics: Dict[str, UserMetric] = {}
-        wanted = {u.lower() for u in user_ids} if user_ids else None
+        wanted = {normalize_email(u) for u in user_ids} if user_ids else None
 
         for entry in raw_entries:
             ts = entry.get("timestamp")
@@ -246,13 +248,14 @@ class LoggingMetricsClient:
             user_id = labels.get("user_id")
             if not user_id:
                 continue
-            if wanted and user_id.lower() not in wanted:
+            canonical_user_id = normalize_email(user_id)
+            if wanted and canonical_user_id not in wanted:
                 continue
 
             payload = entry.get("jsonPayload", {})
             self._accumulate(
                 metrics,
-                user_id=user_id,
+                user_id=canonical_user_id,
                 client_name=labels.get("client_name") or "unknown_client",
                 model=_label_model(labels),
                 metadata=payload.get("metadata", {}),

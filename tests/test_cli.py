@@ -286,7 +286,7 @@ def test_cap_apply_dry_run(monkeypatch):
 def test_cap_apply_argument_validation():
     res = runner.invoke(app, ["cap", "apply", "--period", "daily", "--project", PROJECT])
     assert res.exit_code == 1
-    assert "Please specify at least --requests or --tokens" in res.output
+    assert "Please specify at least --requests, --tokens limit, or --config-file" in res.output
 
     res_all = runner.invoke(
         app, ["cap", "apply", "--period", "all", "--tokens", "1", "--project", PROJECT]

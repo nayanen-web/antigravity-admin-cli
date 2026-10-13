@@ -355,7 +355,7 @@ DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * 
 CAP_PERIOD="monthly" \
 CAP_CONFIG_FILE="user_caps.json" \
 ALERT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/..." \
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "0 0 1 * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
 
 # Bypass preflight check when partial coverage is expected
 SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"

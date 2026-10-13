@@ -14,6 +14,7 @@ from agy_admin.logging_client import LoggingMetricsClient
 from agy_admin.models import (
     AuditAction,
     CapRule,
+    DisallowMode,
     GateId,
     PeriodType,
     ReasonCode,
@@ -369,3 +370,41 @@ def test_no_thresholds_is_a_noop():
     assert result.violations == []
     assert result.disallowed_users == []
     assert result.gates == []
+
+
+def test_g4_circuit_breaker_exempts_restores_on_monthly_reset():
+    """Bug 4 reproduction:
+    Target scale is 300+ concurrent users.
+    At monthly reset, >60 capped users (70) are restore candidates.
+    G4 budget is max(10, 60) = 60. Restores must be exempt from G4 budget,
+    and all 70 users must be restored in one run without aborting.
+    """
+    capped_users = [f"user:capped{i}@corp.com" for i in range(70)]
+    allowed_users = [f"user:active{i}@corp.com" for i in range(230)]
+    bindings = {
+        CAP_ROLE: list(capped_users),
+        DEFAULT_ALLOWED_ROLE: list(allowed_users),
+    }
+    cap_mgr, iam = make_manager(bindings)
+
+    # Monthly reset: minimal usage so G3 passes
+    mock_entries = [entry("active0@corp.com", 10)]
+
+    result = cap_mgr.enforce_caps(
+        period=PeriodType.MONTHLY,
+        max_tokens=5000000,
+        mock_entries=mock_entries,
+        disallow_mode=DisallowMode.CUSTOM_ROLE,
+        dry_run=False,
+    )
+
+    assert result.aborted is False
+    assert result.gate(GateId.G4_CHANGE_BUDGET).passed is True
+    assert len(result.allowed_users) == 70
+    assert len(result.disallowed_users) == 0
+
+    snap = iam.get_policy_snapshot()
+    assert len(snap.members(CAP_ROLE)) == 0
+    for u in capped_users:
+        assert u in snap.members(DEFAULT_ALLOWED_ROLE)
+

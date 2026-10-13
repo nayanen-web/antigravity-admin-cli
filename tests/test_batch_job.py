@@ -302,6 +302,30 @@ def test_main_single_shot_parses_env(monkeypatch):
     assert args["webhook_url"] == "https://chat.example.com/webhook"
 
 
+def test_main_with_config_file_does_not_pass_env_caps(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("GCP_PROJECT", "env-test-proj")
+    monkeypatch.setenv("CAP_CONFIG_FILE", "/path/to/user_caps.json")
+    monkeypatch.setenv("CAP_REQUESTS", "1000")
+    monkeypatch.setenv("CAP_TOKENS", "1000000")
+
+    calls = []
+
+    def mock_cycle(**kwargs):
+        calls.append(kwargs)
+        return EnforceResult(period="daily", dry_run=False)
+
+    monkeypatch.setattr("agy_admin.batch_job.run_enforcement_cycle", mock_cycle)
+
+    main()
+
+    assert len(calls) == 1
+    args = calls[0]
+    assert args["config_file"] == "/path/to/user_caps.json"
+    assert args["cap_requests"] is None
+    assert args["cap_tokens"] is None
+
+
 def test_main_exits_nonzero_when_cycle_aborts(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("GCP_PROJECT", "env-test-proj")

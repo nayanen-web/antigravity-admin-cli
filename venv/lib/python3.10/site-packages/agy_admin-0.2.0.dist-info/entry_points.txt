@@ -1,2 +1,0 @@
-[console_scripts]
-agy-admin-cli = agy_admin.cli:app

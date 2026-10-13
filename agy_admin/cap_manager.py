@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Union
 
 from agy_admin.config import Settings, get_settings
-from agy_admin.iam_manager import BindingOp, IAMManager
+from agy_admin.iam_manager import BindingOp, IAMManager, normalize_email
 from agy_admin.logging_client import LoggingMetricsClient, MetricsFetchResult
 from agy_admin.models import (
     AuditAction,
@@ -74,13 +74,14 @@ class CapManager:
         normalized_overrides: Dict[str, dict] = {}
         if user_overrides:
             for k, v in user_overrides.items():
+                canon_k = normalize_email(k)
                 if isinstance(v, UserCapLimit):
-                    normalized_overrides[k.strip().lower()] = v.model_dump(exclude_unset=True)
+                    normalized_overrides[canon_k] = v.model_dump(exclude_unset=True)
                 elif isinstance(v, dict):
-                    normalized_overrides[k.strip().lower()] = v
+                    normalized_overrides[canon_k] = v
 
         for user_id, m in metrics.items():
-            user_key = user_id.strip().lower()
+            user_key = normalize_email(user_id or m.user_id)
             override_cfg = normalized_overrides.get(user_key)
             is_override = override_cfg is not None
 
@@ -98,7 +99,7 @@ class CapManager:
             if eff_requests is not None and m.total_requests > eff_requests:
                 violations.append(
                     CapViolation(
-                        user_id=user_id,
+                        user_id=user_key,
                         period=rule.period.value,
                         metric_type="requests",
                         limit=eff_requests,
@@ -112,7 +113,7 @@ class CapManager:
             if eff_tokens is not None and m.total_tokens > eff_tokens:
                 violations.append(
                     CapViolation(
-                        user_id=user_id,
+                        user_id=user_key,
                         period=rule.period.value,
                         metric_type="tokens",
                         limit=eff_tokens,
@@ -147,9 +148,9 @@ class CapManager:
         target_config_file = config_file or os.environ.get("CAP_CONFIG_FILE")
         if target_config_file:
             cap_config = load_cap_config(target_config_file)
-            if max_requests is None and cap_config.default.max_requests is not None:
+            if cap_config.default.max_requests is not None:
                 max_requests = cap_config.default.max_requests
-            if max_tokens is None and cap_config.default.max_tokens is not None:
+            if cap_config.default.max_tokens is not None:
                 max_tokens = cap_config.default.max_tokens
 
         if max_requests is None and max_tokens is None and (not cap_config or not cap_config.overrides):
@@ -191,18 +192,43 @@ class CapManager:
             window_type=window_type,
             mock_entries=mock_entries,
         )
-        metrics = fetch.metrics
+        canonical_metrics: Dict[str, UserMetric] = {}
+        for k, m in fetch.metrics.items():
+            canon_k = normalize_email(k or m.user_id)
+            if canon_k in canonical_metrics:
+                existing = canonical_metrics[canon_k]
+                existing.total_tokens += m.total_tokens
+                existing.total_requests += m.total_requests
+                existing.prompt_tokens += m.prompt_tokens
+                existing.candidates_tokens += m.candidates_tokens
+                for c in m.clients:
+                    if c not in existing.clients:
+                        existing.clients.append(c)
+                for mdl in m.models:
+                    if mdl not in existing.models:
+                        existing.models.append(mdl)
+                if m.first_active and (existing.first_active is None or m.first_active < existing.first_active):
+                    existing.first_active = m.first_active
+                if m.last_active and (existing.last_active is None or m.last_active > existing.last_active):
+                    existing.last_active = m.last_active
+            else:
+                m.user_id = canon_k
+                canonical_metrics[canon_k] = m
+        metrics = canonical_metrics
 
         for uid in self.iam_manager.get_capped_users():
-            metrics.setdefault(uid, UserMetric(user_id=uid))
+            canon_uid = normalize_email(uid)
+            metrics.setdefault(canon_uid, UserMetric(user_id=canon_uid))
         for uid in self.iam_manager.get_admin_blocked_users():
-            metrics.setdefault(uid, UserMetric(user_id=uid))
+            canon_uid = normalize_email(uid)
+            metrics.setdefault(canon_uid, UserMetric(user_id=canon_uid))
 
         assessments = self.iam_manager.evaluate_users(list(metrics.keys()))
         for uid, a in assessments.items():
-            if uid in metrics:
-                metrics[uid].status = a.status
-                metrics[uid].reason = a.reason
+            canon_uid = normalize_email(uid)
+            if canon_uid in metrics:
+                metrics[canon_uid].status = a.status
+                metrics[canon_uid].reason = a.reason
 
         result.evaluated_users_count = len(metrics)
         result.coverage = Coverage.from_assessments(assessments)
@@ -244,15 +270,16 @@ class CapManager:
             user_overrides=cap_config.overrides if cap_config else None,
         )
         result.violations = violations
-        violating_uids: Set[str] = {v.user_id for v in violations}
+        violating_uids: Set[str] = {normalize_email(v.user_id) for v in violations}
 
         to_disallow: Set[str] = set()
         unenforceable: List[CapViolation] = []
 
         for v in violations:
-            status = assessments[v.user_id].status if v.user_id in assessments else UserStatus.UNKNOWN
+            canon_v_uid = normalize_email(v.user_id)
+            status = assessments[canon_v_uid].status if canon_v_uid in assessments else UserStatus.UNKNOWN
             if status == UserStatus.ENFORCEABLE_ALLOWED:
-                to_disallow.add(v.user_id)
+                to_disallow.add(canon_v_uid)
             elif status in (UserStatus.CAPPED_BY_TOOL, UserStatus.BLOCKED_BY_ADMIN):
                 # Already blocked; nothing to do and nothing to claim.
                 continue
@@ -261,7 +288,7 @@ class CapManager:
                 logger.warning(
                     "User %s exceeded the %s cap (limit=%s, actual=%s) but is %s (%s). "
                     "No IAM change was made; manual action is required.",
-                    v.user_id,
+                    canon_v_uid,
                     v.metric_type,
                     v.limit,
                     v.actual,
@@ -272,13 +299,14 @@ class CapManager:
         to_allow: Set[str] = set()
         if telemetry_healthy:
             for uid, a in assessments.items():
-                if a.status == UserStatus.CAPPED_BY_TOOL and uid not in violating_uids:
-                    to_allow.add(uid)
+                canon_uid = normalize_email(uid)
+                if a.status == UserStatus.CAPPED_BY_TOOL and canon_uid not in violating_uids:
+                    to_allow.add(canon_uid)
         else:
             withheld = [
-                uid
+                normalize_email(uid)
                 for uid, a in assessments.items()
-                if a.status == UserStatus.CAPPED_BY_TOOL and uid not in violating_uids
+                if a.status == UserStatus.CAPPED_BY_TOOL and normalize_email(uid) not in violating_uids
             ]
             for uid in withheld:
                 self._audit(
@@ -291,13 +319,15 @@ class CapManager:
                 )
 
         # --- G4: circuit breaker ----------------------------------------
-        change_count = len(to_disallow) + len(to_allow)
+        # Count only new restrictions (to_disallow) against the change budget.
+        # Restores (to_allow) reduce access risk and are excluded from the budget.
+        disallow_count = len(to_disallow)
         budget = self.settings.change_budget(len(metrics))
-        if change_count > budget:
+        if disallow_count > budget:
             return self._abort(
                 result,
                 GateId.G4_CHANGE_BUDGET,
-                f"This cycle would change {change_count} binding(s), exceeding the "
+                f"This cycle would disallow {disallow_count} user(s), exceeding the "
                 f"safety budget of {budget}.",
                 unenforceable=unenforceable,
             )
@@ -305,7 +335,7 @@ class CapManager:
             GateResult(
                 gate=GateId.G4_CHANGE_BUDGET,
                 passed=True,
-                detail=f"{change_count}/{budget}",
+                detail=f"{disallow_count}/{budget}",
             )
         )
 

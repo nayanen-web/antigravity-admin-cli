@@ -20,8 +20,8 @@ SERVICE_ACCOUNT="agy-admin-sa@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Cap and policy settings (override by exporting or prefixing before running script)
 CAP_PERIOD="${CAP_PERIOD:-daily}"
-CAP_REQUESTS="${CAP_REQUESTS:-1000}"
-CAP_TOKENS="${CAP_TOKENS:-1000000}"
+CAP_REQUESTS="${CAP_REQUESTS-1000}"
+CAP_TOKENS="${CAP_TOKENS-1000000}"
 WINDOW_TYPE="${WINDOW_TYPE:-calendar}"
 IAM_DISALLOW_MODE="${IAM_DISALLOW_MODE:-custom_role}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -99,12 +99,19 @@ gcloud builds submit --tag "${IMAGE_URI}" --project="${PROJECT_ID}" .
 
 # 5. Create or update Cloud Run Job
 echo "==> Deploying Cloud Run Job '${JOB_NAME}'..."
-ENV_VARS="GCP_PROJECT=${PROJECT_ID},CAP_PERIOD=${CAP_PERIOD},CAP_REQUESTS=${CAP_REQUESTS},CAP_TOKENS=${CAP_TOKENS},WINDOW_TYPE=${WINDOW_TYPE},IAM_DISALLOW_MODE=${IAM_DISALLOW_MODE},DRY_RUN=${DRY_RUN}"
-if [[ -n "${ALERT_WEBHOOK_URL}" ]]; then
-  ENV_VARS="${ENV_VARS},ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}"
-fi
+ENV_VARS="GCP_PROJECT=${PROJECT_ID},CAP_PERIOD=${CAP_PERIOD},WINDOW_TYPE=${WINDOW_TYPE},IAM_DISALLOW_MODE=${IAM_DISALLOW_MODE},DRY_RUN=${DRY_RUN}"
 if [[ -n "${CAP_CONFIG_FILE:-}" ]]; then
   ENV_VARS="${ENV_VARS},CAP_CONFIG_FILE=${CAP_CONFIG_FILE}"
+else
+  if [[ -n "${CAP_REQUESTS}" ]]; then
+    ENV_VARS="${ENV_VARS},CAP_REQUESTS=${CAP_REQUESTS}"
+  fi
+  if [[ -n "${CAP_TOKENS}" ]]; then
+    ENV_VARS="${ENV_VARS},CAP_TOKENS=${CAP_TOKENS}"
+  fi
+fi
+if [[ -n "${ALERT_WEBHOOK_URL}" ]]; then
+  ENV_VARS="${ENV_VARS},ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}"
 fi
 
 gcloud run jobs deploy "${JOB_NAME}" \
