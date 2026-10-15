@@ -2,6 +2,18 @@
   "currency": "USD",
   "unknown_model_policy": "max",
   "models": {
+    "gemini-4-argon": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
+      {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
+    ],
+    "gemini-argon": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
+      {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
+    ],
+    "gemini-4-argon-preview": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
+      {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
+    ],
     "gemini-3.8-flash": [
       {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 3.75},
       {"effective_from": "2027-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}

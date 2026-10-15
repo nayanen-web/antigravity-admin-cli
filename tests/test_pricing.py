@@ -148,6 +148,48 @@ def test_effective_from_date_switching():
 
 
 # ---------------------------------------------------------------------------
+# 4b. Gemini 4 Argon: introductory ($2 in / $0.10 cached / $10 out) vs standard ($4 in / $0.20 cached / $20 out)
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_4_argon_pricing_and_date_tiering():
+    table = get_default_price_table()
+    metadata = {
+        "promptTokenCount": 1000000,
+        "cachedContentTokenCount": 200000,
+        "candidatesTokenCount": 50000,
+        "thoughtsTokenCount": 50000,
+    }
+    # uncached = 800,000; cached = 200,000; total output (candidates + thoughts) = 100,000
+    ts_intro = datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc)
+    ts_std = datetime(2026, 12, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Introductory rate (before 2026-12-01):
+    # uncached: 800k * $2.00 / 1e6 = $1.60
+    # cached: 200k * $0.10 / 1e6 = $0.02
+    # output: 100k * $10.00 / 1e6 = $1.00
+    # total = $2.62
+    cost_intro, priced_intro = estimate_entry_cost("gemini-4-argon", metadata, ts_intro, price_table=table)
+    assert priced_intro is True
+    assert abs(cost_intro - 2.62) < 1e-6
+
+    # Verify aliases resolve to introductory rate
+    for alias in ["gemini-argon", "publishers/google/models/gemini-4-argon", "gemini-4-argon-preview"]:
+        cost_alias, priced_alias = estimate_entry_cost(alias, metadata, ts_intro, price_table=table)
+        assert priced_alias is True
+        assert abs(cost_alias - 2.62) < 1e-6
+
+    # Standard rate (effective 2026-12-01):
+    # uncached: 800k * $4.00 / 1e6 = $3.20
+    # cached: 200k * $0.20 / 1e6 = $0.04
+    # output: 100k * $20.00 / 1e6 = $2.00
+    # total = $5.24
+    cost_std, priced_std = estimate_entry_cost("gemini-4-argon", metadata, ts_std, price_table=table)
+    assert priced_std is True
+    assert abs(cost_std - 5.24) < 1e-6
+
+
+# ---------------------------------------------------------------------------
 # 5. Unknown model with max and skip policies, and that it is reported
 # ---------------------------------------------------------------------------
 
