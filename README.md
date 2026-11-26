@@ -376,22 +376,48 @@ DRY_RUN=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * 
 
 # Deploy with customized cap thresholds, per-user overrides, and alerts
 CAP_PERIOD="monthly" \
-CAP_CONFIG_FILE="user_caps.json" \
+CAP_CONFIG_FILE="/etc/agy/user_caps.json" \
 ALERT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/..." \
-./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
+./scripts/deploy_cloud_run.sh <PROJECT_ID> <REGION> "*/15 * * * *"
 
 # Bypass preflight check when partial coverage is expected
-SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> asia-south1 "*/15 * * * *"
+SKIP_PREFLIGHT=true ./scripts/deploy_cloud_run.sh <PROJECT_ID> <REGION> "*/15 * * * *"
 ```
 
-### 2) Execution & Verification
+### 2) Attaching Secrets via Secret Manager (Optional)
+When storing `user_caps.json` in Google Cloud Secret Manager, mount the secret into the Cloud Run Job. Because `deploy_cloud_run.sh` re-creates the job spec without Secret Manager bindings, re-run this update step after every deployment:
+
+```bash
+# 1. Create or update the secret in Secret Manager
+gcloud secrets create <SECRET_NAME> \
+  --data-file=user_caps.json \
+  --project=<PROJECT_ID>
+# (Or add a new version when caps are updated)
+gcloud secrets versions add <SECRET_NAME> \
+  --data-file=user_caps.json \
+  --project=<PROJECT_ID>
+
+# 2. Grant Secret Accessor to the Cloud Run service account
+gcloud secrets add-iam-policy-binding <SECRET_NAME> \
+  --member="serviceAccount:agy-admin-sa@<PROJECT_ID>.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor" \
+  --project=<PROJECT_ID>
+
+# 3. Mount the secret into the Cloud Run Job container
+gcloud run jobs update agy-cap-enforcer \
+  --region=<REGION> \
+  --set-secrets="/etc/agy/user_caps.json=<SECRET_NAME>:latest" \
+  --project=<PROJECT_ID>
+```
+
+### 3) Execution & Verification
 ```bash
 # Trigger an immediate run
-gcloud run jobs execute agy-cap-enforcer --region=asia-south1 --project=<PROJECT_ID>
+gcloud run jobs execute agy-cap-enforcer --region=<REGION> --project=<PROJECT_ID>
 
 # View job execution logs
 gcloud beta run jobs executions logs tail \
-  $(gcloud run jobs executions list --job=agy-cap-enforcer --region=asia-south1 --project=<PROJECT_ID> --limit=1 --format="value(name)") \
+  $(gcloud run jobs executions list --job=agy-cap-enforcer --region=<REGION> --project=<PROJECT_ID> --limit=1 --format="value(name)") \
   --project=<PROJECT_ID>
 
 # Review administrative audit records
