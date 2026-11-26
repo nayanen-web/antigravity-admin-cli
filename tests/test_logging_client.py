@@ -339,3 +339,91 @@ def test_audit_payload_carries_state_and_reason():
     assert "forced" not in payload
 
 
+class _RateLimited(Exception):
+    code = 429
+
+
+class _FakeEntry:
+    def __init__(self, insert_id, ts, user="a@corp.com", tokens=1):
+        self.insert_id = insert_id
+        self.timestamp = ts
+        self.labels = {"user_id": user}
+        self.payload = {"metadata": {"totalTokenCount": tokens}}
+
+
+class _FlakyLoggingClient:
+    """Yields entries from the resume point and fails once per scripted cut."""
+
+    def __init__(self, entries, fail_after):
+        self.entries = entries
+        self.fail_after = list(fail_after)
+        self.filters = []
+
+    def list_entries(self, filter_, order_by, page_size):
+        self.filters.append(filter_)
+        start = filter_.split('timestamp >= "')[1].split('"')[0]
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        fail_at = self.fail_after.pop(0) if self.fail_after else None
+        yielded = 0
+        for e in self.entries:
+            if e.timestamp < start_dt:
+                continue
+            if fail_at is not None and yielded == fail_at:
+                raise _RateLimited("429 Quota exceeded")
+            yielded += 1
+            yield e
+
+
+def _ts(sec, micro=0):
+    return datetime(2026, 10, 20, 0, 0, sec, micro, tzinfo=timezone.utc)
+
+
+def test_rate_limit_resumes_without_double_counting(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("agy_admin.logging_client.time.sleep", sleeps.append)
+
+    entries = [
+        _FakeEntry("e1", _ts(1)),
+        _FakeEntry("e2", _ts(2, 100)),
+        _FakeEntry("e3", _ts(2, 500)),
+        _FakeEntry("e4", _ts(3), user="b@corp.com"),
+    ]
+    fake = _FlakyLoggingClient(entries, fail_after=[2, 0])
+    client = LoggingMetricsClient("p", client=fake)
+
+    result = client._query_cloud_logging(_ts(0), _ts(10))
+
+    assert result.query_ok is True
+    assert result.entry_count == 4
+    assert result.metrics["a@corp.com"].total_requests == 3
+    assert result.metrics["b@corp.com"].total_requests == 1
+    assert len(sleeps) == 2
+    # Resumes from the boundary second, not from the original start.
+    assert 'timestamp >= "2026-10-20T00:00:02Z"' in fake.filters[1]
+
+
+def test_rate_limit_gives_up_after_max_retries(monkeypatch):
+    monkeypatch.setattr("agy_admin.logging_client.time.sleep", lambda _s: None)
+
+    fake = _FlakyLoggingClient([_FakeEntry("e1", _ts(1))], fail_after=[0] * 20)
+    result = LoggingMetricsClient("p", client=fake)._query_cloud_logging(_ts(0), _ts(10))
+
+    assert result.query_ok is False
+    assert "429" in result.error
+    assert result.metrics == {}
+
+
+def test_non_rate_limit_errors_are_not_retried(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("agy_admin.logging_client.time.sleep", sleeps.append)
+
+    class _Denied:
+        def list_entries(self, **_kw):
+            raise PermissionError("PERMISSION_DENIED")
+
+    result = LoggingMetricsClient("p", client=_Denied())._query_cloud_logging(_ts(0), _ts(10))
+
+    assert result.query_ok is False
+    assert sleeps == []
+
+

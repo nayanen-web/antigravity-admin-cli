@@ -2,6 +2,7 @@
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Union
@@ -20,6 +21,17 @@ _SAFE_USER_ID = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"
 #: ``labels.model_id`` but only read ``labels.model``, so the column was always
 #: empty.
 _MODEL_LABELS = ("model_id", "model")
+
+#: Read quota is 120 requests/min/project and shared with the scheduled
+#: enforcer job, so backoff must be able to outlast a full minute window.
+_MAX_RATE_LIMIT_RETRIES = 6
+_INITIAL_BACKOFF_SECONDS = 10.0
+_MAX_BACKOFF_SECONDS = 60.0
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    # api_core's TooManyRequests (REST) and ResourceExhausted (gRPC) both carry 429.
+    return getattr(exc, "code", None) == 429
 
 
 def calculate_time_range(
@@ -202,59 +214,92 @@ class LoggingMetricsClient:
         end_time: datetime,
         user_ids: Optional[List[str]] = None,
     ) -> MetricsFetchResult:
-        lql_filter = self._build_filter(start_time, end_time, user_ids)
-        logger.info("Executing Cloud Logging query: %s", lql_filter)
+        result = MetricsFetchResult()
+        # The filter has second precision, so on resume the whole boundary
+        # second is re-read and already-counted entries are skipped by insert_id.
+        resume_from = start_time
+        seen_in_second: set = set()
+        current_second: Optional[datetime] = None
+        retries = 0
+        backoff = _INITIAL_BACKOFF_SECONDS
 
         try:
             client = self._get_client()
-            entries = client.list_entries(filter_=lql_filter, page_size=1000)
-            return self._aggregate_cloud_logging_entries(entries)
+            while True:
+                lql_filter = self._build_filter(resume_from, end_time, user_ids)
+                logger.info("Executing Cloud Logging query: %s", lql_filter)
+                skip_ids = set(seen_in_second)
+                try:
+                    for entry in client.list_entries(
+                        filter_=lql_filter, order_by="timestamp asc", page_size=1000
+                    ):
+                        if entry.insert_id in skip_ids:
+                            continue
+                        if entry.timestamp is not None:
+                            second = entry.timestamp.replace(microsecond=0)
+                            if second != current_second:
+                                current_second = second
+                                seen_in_second = set()
+                        seen_in_second.add(entry.insert_id)
+                        self._aggregate_entry(result, entry)
+                    return result
+                except Exception as e:  # noqa: BLE001
+                    if not _is_rate_limited(e) or retries >= _MAX_RATE_LIMIT_RETRIES:
+                        raise
+                    retries += 1
+                    logger.warning(
+                        "Cloud Logging read quota exceeded after %d entries; "
+                        "retrying in %.0fs (attempt %d/%d)",
+                        result.entry_count,
+                        backoff,
+                        retries,
+                        _MAX_RATE_LIMIT_RETRIES,
+                    )
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
+                    if current_second is not None:
+                        resume_from = current_second
         except Exception as e:  # noqa: BLE001
             # Never surface a query failure as "zero usage"; gate G3 depends on
             # being able to tell the difference.
             logger.error("Failed to query Cloud Logging: %s", e)
             return MetricsFetchResult(query_ok=False, error=str(e))
 
-    def _aggregate_cloud_logging_entries(self, entries) -> MetricsFetchResult:
-        result = MetricsFetchResult()
+    def _aggregate_entry(self, result: MetricsFetchResult, entry) -> None:
+        result.entry_count += 1
+        labels = entry.labels or {}
+        user_id = labels.get("user_id")
+        if not user_id:
+            return
 
-        for entry in entries:
-            result.entry_count += 1
-            labels = entry.labels or {}
-            user_id = labels.get("user_id")
-            if not user_id:
-                continue
+        canonical_user_id = normalize_email(user_id)
+        payload = entry.payload
+        metadata = {}
+        if isinstance(payload, dict):
+            metadata = payload.get("metadata") or {}
 
-            canonical_user_id = normalize_email(user_id)
-            payload = entry.payload
-            metadata = {}
-            if isinstance(payload, dict):
-                metadata = payload.get("metadata") or {}
-
-            model_name = _label_model(labels)
-            cost_usd, priced = estimate_entry_cost(
-                model=model_name,
-                metadata=metadata,
-                ts=entry.timestamp,
-                price_table=self.price_table,
-            )
-            if not priced:
-                result.unpriced_model_counts[model_name] = (
-                    result.unpriced_model_counts.get(model_name, 0) + 1
-                )
-
-            self._accumulate(
-                result.metrics,
-                user_id=canonical_user_id,
-                client_name=labels.get("client_name") or "unknown_client",
-                model=model_name,
-                metadata=metadata,
-                ts=entry.timestamp,
-                cost_usd=cost_usd,
-                priced=priced,
+        model_name = _label_model(labels)
+        cost_usd, priced = estimate_entry_cost(
+            model=model_name,
+            metadata=metadata,
+            ts=entry.timestamp,
+            price_table=self.price_table,
+        )
+        if not priced:
+            result.unpriced_model_counts[model_name] = (
+                result.unpriced_model_counts.get(model_name, 0) + 1
             )
 
-        return result
+        self._accumulate(
+            result.metrics,
+            user_id=canonical_user_id,
+            client_name=labels.get("client_name") or "unknown_client",
+            model=model_name,
+            metadata=metadata,
+            ts=entry.timestamp,
+            cost_usd=cost_usd,
+            priced=priced,
+        )
 
     def _aggregate_from_entries(
         self,
