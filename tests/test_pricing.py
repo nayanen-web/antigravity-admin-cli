@@ -189,6 +189,74 @@ def test_gemini_4_argon_pricing_and_date_tiering():
     assert abs(cost_std - 5.24) < 1e-6
 
 
+def test_gemini_4_carbon_neon_hydrogen_pricing():
+    table = get_default_price_table()
+    metadata = {
+        "promptTokenCount": 1000000,
+        "cachedContentTokenCount": 200000,
+        "candidatesTokenCount": 50000,
+        "thoughtsTokenCount": 50000,
+    }
+    # uncached = 800k, cached = 200k, output = 100k
+    ts_intro = datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc)
+    ts_std = datetime(2026, 12, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Carbon intro ($2 in / $0.10 cached / $10 out -> $2.62)
+    cost_c_intro, priced = estimate_entry_cost("gemini-4-carbon", metadata, ts_intro, price_table=table)
+    assert priced is True
+    assert abs(cost_c_intro - 2.62) < 1e-6
+
+    cost_alias, priced_alias = estimate_entry_cost("gemini-carbon", metadata, ts_intro, price_table=table)
+    assert priced_alias is True
+    assert abs(cost_alias - 2.62) < 1e-6
+
+    # Carbon standard ($4 in / $0.20 cached / $20 out -> $5.24)
+    cost_c_std, priced = estimate_entry_cost("gemini-4-carbon", metadata, ts_std, price_table=table)
+    assert priced is True
+    assert abs(cost_c_std - 5.24) < 1e-6
+
+    # Neon ($3 in / $0.15 cached / $15 out -> $3.93)
+    cost_neon, priced = estimate_entry_cost("gemini-4-neon", metadata, ts_intro, price_table=table)
+    assert priced is True
+    assert abs(cost_neon - 3.93) < 1e-6
+
+    # Hydrogen ($1.50 in / $0.15 cached / $7.50 out -> $1.98)
+    cost_hydro, priced = estimate_entry_cost("gemini-4-hydrogen", metadata, ts_intro, price_table=table)
+    assert priced is True
+    assert abs(cost_hydro - 1.98) < 1e-6
+
+
+def test_audio_live_and_media_models_pricing():
+    table = get_default_price_table()
+    meta = {
+        "promptTokenCount": 1000000,
+        "cachedContentTokenCount": 200000,
+        "candidatesTokenCount": 100000,
+    }
+    # uncached = 800k, cached = 200k, output = 100k
+    ts = datetime(2026, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    # gemini-3.8-live: in: 0.75, cached: 0.075, out: 4.50 -> $1.065
+    cost_live, priced = estimate_entry_cost("gemini-3.8-live", meta, ts, price_table=table)
+    assert priced is True
+    assert abs(cost_live - 1.065) < 1e-6
+
+    # gemini-3.8-flash-tts (2026): in: 0.50, cached: 0.05, out: 9.00 -> $1.31
+    cost_tts, priced = estimate_entry_cost("gemini-3.8-flash-tts", meta, ts, price_table=table)
+    assert priced is True
+    assert abs(cost_tts - 1.31) < 1e-6
+
+    # gemini-3.5-transcribe: in: 2.00, cached: 0.20, out: 12.00 -> $2.84
+    cost_transcribe, priced = estimate_entry_cost("gemini-3.5-transcribe", meta, ts, price_table=table)
+    assert priced is True
+    assert abs(cost_transcribe - 2.84) < 1e-6
+
+    # nano-banana-2 with image_output ($30/1M): in: 1.50, cached: 0.15, image_output: 30.00 -> $4.23
+    cost_img, priced = estimate_entry_cost("nano-banana-2", meta, ts, price_table=table)
+    assert priced is True
+    assert abs(cost_img - 4.23) < 1e-6
+
+
 # ---------------------------------------------------------------------------
 # 5. Unknown model with max and skip policies, and that it is reported
 # ---------------------------------------------------------------------------

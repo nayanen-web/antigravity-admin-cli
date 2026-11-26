@@ -14,9 +14,55 @@
       {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
       {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
     ],
+    "gemini-4-carbon": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
+      {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
+    ],
+    "gemini-carbon": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
+      {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
+    ],
+    "gemini-4-carbon-preview": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.10, "output": 10.00},
+      {"effective_from": "2026-12-01", "input": 4.00, "cached": 0.20, "output": 20.00}
+    ],
+    "gemini-4-neon": [
+      {"effective_from": "2026-01-01", "input": 3.00, "cached": 0.15, "output": 15.00}
+    ],
+    "gemini-neon": [
+      {"effective_from": "2026-01-01", "input": 3.00, "cached": 0.15, "output": 15.00}
+    ],
+    "gemini-4-neon-preview": [
+      {"effective_from": "2026-01-01", "input": 3.00, "cached": 0.15, "output": 15.00}
+    ],
+    "gemini-4-hydrogen": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
+    "gemini-hydrogen": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
+    "gemini-4-hydrogen-preview": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
     "gemini-3.8-flash": [
       {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 3.75},
       {"effective_from": "2027-01-01", "input": 1.50, "cached": 0.15, "output": 7.50}
+    ],
+    "gemini-3.8-live": [
+      {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 4.50}
+    ],
+    "gemini-3.8-live-extended-thinking": [
+      {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 4.50}
+    ],
+    "gemini-3.8-flash-tts": [
+      {"effective_from": "2026-01-01", "input": 0.50, "cached": 0.05, "output": 9.00},
+      {"effective_from": "2027-01-01", "input": 1.00, "cached": 0.10, "output": 18.00}
+    ],
+    "gemini-3.5-transcribe": [
+      {"effective_from": "2026-01-01", "input": 2.00, "cached": 0.20, "output": 12.00}
+    ],
+    "gemini-3.5-transcribe-live": [
+      {"effective_from": "2026-01-01", "input": 3.50, "cached": 0.35, "output": 21.00}
     ],
     "gemini-3.7-flash": [
       {"effective_from": "2026-01-01", "input": 0.75, "cached": 0.075, "output": 3.75},
@@ -66,6 +112,12 @@
       {"effective_from": "2026-01-01", "input": 0.25, "cached": 0.025, "output": 1.50, "image_output": 30.00}
     ],
     "gemini-nano-banana-2.1": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50, "image_output": 30.00}
+    ],
+    "nano-banana-2": [
+      {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50, "image_output": 30.00}
+    ],
+    "nano-banana-2-lite": [
       {"effective_from": "2026-01-01", "input": 1.50, "cached": 0.15, "output": 7.50, "image_output": 30.00}
     ],
     "gemini-omni-1.1-flash": [
